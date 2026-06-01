@@ -15,6 +15,13 @@
 
 ---
 
+### 2026-06-02 — 방향 전환: positive-first로 전면 재설계
+- 무엇을: 핵심을 **positive soft phrase bias**로 재정의. block/suppress(negative)는 **보류**. SSOT·impl-plan 전면 재작성, deep-research-report.md → `archive/` 이동
+- 결정: 입력=문자열+total_bias / special token 제거(leading-space는 유지) / start_bias 없음 continuation만 / step_bias=total/(len-1) / overlap=합산 후 clamp / 1-token skip / canonical top-1 / reverse trie / init-time compile / empty no-op
+- 로드맵: P1 CPU positive+trie → P2 GPU indexed_add(parity) → P3 Python binding+tokenizer compile → P4 faster-whisper
+- 금지사항·acceptance test·microbenchmark를 SSOT/impl-plan에 명시
+- 영향: 문서만. 기존 block 기반 impl-plan(Task 2~6) 폐기. Task 1 데이터 모델(commit 34e52dd)은 positive에 재사용
+
 ### 2026-06-01 — 디자인 검증 (실제 코드 대조)
 - 무엇을: SSOT 가정 7개를 현재 체크아웃 코드와 1:1 대조 → 전부 일치 확인. refinement V1~V5 추가(processor 순서, disable 1회 적용, merged 레이아웃, step0 null 가드, soft=RepetitionPenalty 템플릿)
 - 왜: 보고서가 ZIP 정적 분석 기반이라 실제 코드와 어긋날 리스크 제거
