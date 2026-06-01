@@ -1,4 +1,5 @@
 #include <ctranslate2/decoding.h>
+#include <ctranslate2/models/whisper.h>
 
 #include "test_utils.h"
 
@@ -13,4 +14,18 @@ TEST(DecodingTest, DisableTokens) {
   disable_tokens.apply();
 
   expect_storage_eq(input, expected);
+}
+
+TEST(PhraseBiasTest, WhisperOptionsDefaultsEmpty) {
+  ctranslate2::models::WhisperOptions options;
+  EXPECT_TRUE(options.phrase_biases.empty());
+}
+
+TEST(PhraseBiasTest, PhraseBiasPathDefaults) {
+  ctranslate2::models::PhraseBiasPath path;
+  EXPECT_EQ(path.ids.size(), 0u);
+  EXPECT_FLOAT_EQ(path.start_bias, 0.f);
+  EXPECT_FLOAT_EQ(path.step_bias, 0.f);
+  EXPECT_EQ(path.min_prefix_len, 1u);
+  EXPECT_EQ(path.mode, ctranslate2::models::PhraseBiasMode::Soft);
 }

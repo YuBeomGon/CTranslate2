@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "ctranslate2/generation.h"
 #include "ctranslate2/layers/whisper.h"
 #include "ctranslate2/models/model.h"
@@ -7,6 +9,26 @@
 
 namespace ctranslate2 {
   namespace models {
+
+    enum class PhraseBiasMode : int8_t {
+      Soft = 0,   // logits += bias
+      Block = 1   // disable next token
+    };
+
+    // One tokenization path of a surface form. The bias is applied to the next
+    // token when the current sequence suffix matches a prefix of `ids`.
+    struct PhraseBiasPath {
+      std::vector<size_t> ids;
+      float start_bias = 0.f;        // bias for the first token of the path
+      float step_bias = 0.f;         // bias for continuation tokens
+      uint16_t min_prefix_len = 1;
+      PhraseBiasMode mode = PhraseBiasMode::Soft;
+    };
+
+    // A surface form (and its aliases) compiled to one or more token paths.
+    struct PhraseBias {
+      std::vector<PhraseBiasPath> token_paths;
+    };
 
     struct WhisperOptions {
       // Beam size to use for beam search (set 1 to run greedy search).
@@ -56,6 +78,9 @@ namespace ctranslate2 {
       // List of token IDs to suppress.
       // -1 will suppress a default set of symbols as defined in the model config.json file.
       std::vector<int> suppress_tokens = {-1};
+
+      // Phrase-level bias on domain terms. Empty = disabled (no overhead).
+      std::vector<PhraseBias> phrase_biases;
     };
 
     struct WhisperGenerationResult {
