@@ -45,7 +45,7 @@
 - **Files:** `include/ctranslate2/decoding_utils.h` (`PhraseBiasProcessor : LogitsProcessor`), `src/decoding_utils.cc`, `tests/decoding_test.cc`
 - `apply_first()=false`. `apply()`: `if(!sequences) return;` 가드. 각 row tail을 trie lookup → boost할 `(token_id, step_bias)` 모음 → 같은 token **합산** → **합산 후 clamp** → logits in-place 수정. 구현 템플릿 = `RepetitionPenalty::apply` (Gather + DEVICE_AND_TYPE_DISPATCH). CPU는 직접 더해도 되나 device dispatch 패턴 유지.
 - **Acceptance tests:**
-  - `[A,B,C]`, total=0.6→step=0.3: suffix `[A]` → B logit **+0.3**, suffix `[A,B]` → C **+0.3**
+  - `[A,B,C]`, total=0.5→step=0.25 (len-1=2): suffix `[A]` → B logit **+0.25**, suffix `[A,B]` → C **+0.25**
   - suffix `[X]` → no-op (logits 불변)
   - suffix 없음(step 0, null sequences) → no-op
   - 같은 token에 +0.2,+0.3 겹침 → **+0.5** (합산), clamp 상한 초과 시 clamp

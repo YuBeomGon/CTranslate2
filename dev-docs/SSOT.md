@@ -21,11 +21,12 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 
 | # | 결정 |
 |---|------|
-| **입력** | 문자열 + `total_bias` (예: `"트랜스포머"`, `total_bias=0.6`) |
+| **입력** | 문자열 + `total_bias` (예: `"트랜스포머": 0.5`) |
+| **값 의미** | `total_bias`는 **logit(score) 가산** (퍼센트·배수 아님). `logits[token] += step`. +b는 상대 가중치 ×exp(b). **기본/권장 0.5** (≈×1.65). 범위 0.1~1.5 |
 | **토큰화** | special token(SOT/lang/task/timestamp 등) 제거. **leading-space는 제거 금지** (문장 중간 형태 = `" 트랜스포머"`로 인코딩해야 모델 실제 출력과 매칭됨) |
 | **path** | canonical **top-1 path만** 사용 (alias·다중 path 보류) |
 | **start_bias** | **없음 (0)**. 첫 토큰은 안 올림 → insertion 방지. 음향 근거로 단어가 시작된 뒤 완성만 도움 |
-| **분배** | continuation step에만. `step_bias = total_bias / (len(ids) - 1)`. 예: `[A,B,C,D]`, total=0.6 → 각 +0.2 |
+| **분배** | continuation step에만. `step_bias = total_bias / (len(ids) - 1)`. 예: `[A,B,C,D]`, total=0.5 → 각 +0.167 |
 | **동작** | suffix `[A]`→B에 +step, `[A,B]`→C에 +step, `[A,B,C]`→D에 +step (조건부 continuation) |
 | **overlap** | 같은 step에서 여러 phrase가 같은 `(row, token)`에 bias → **합산**. 예: +0.2, +0.3 → +0.5 |
 | **1-token phrase** | **skip + 경고 로그** (continuation 불가, start_bias=0이라 bias 0) |
