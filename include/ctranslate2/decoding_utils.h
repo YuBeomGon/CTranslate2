@@ -1,7 +1,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
+#include <map>
+#include <unordered_map>
 
 #include "ops/tile.h"
 #include "storage_view.h"
@@ -130,6 +133,28 @@ namespace ctranslate2 {
 
   private:
     const dim_t _ngram_size;
+  };
+
+  // Low-level, model-agnostic phrase bias path. step_bias is precomputed (= total_bias/(len-1), clamped).
+  struct PhraseBiasEntry {
+    std::vector<size_t> ids;
+    float step_bias = 0.f;
+    uint16_t min_prefix_len = 1;
+  };
+
+  // Reverse-prefix trie: maps a reversed suffix to the next token(s) to boost.
+  class PhraseBiasTrie {
+  public:
+    void add(const PhraseBiasEntry& entry);
+    // out[token] += step for every continuation rule whose prefix matches the suffix of `tail`.
+    void lookup(const int32_t* tail, dim_t tail_len, std::map<size_t, float>& out) const;
+
+  private:
+    struct Node {
+      std::unordered_map<size_t, Node> children;     // key = previous token
+      std::vector<std::pair<size_t, float>> actions; // (next_token, step) valid at this depth
+    };
+    Node _root;
   };
 
   // Disable the generation of some sequences of tokens.

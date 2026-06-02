@@ -67,6 +67,36 @@ namespace ctranslate2 {
   }
 
 
+  void PhraseBiasTrie::add(const PhraseBiasEntry& entry) {
+    const auto& ids = entry.ids;
+    if (ids.size() < 2)
+      return;  // 1-token phrase: continuation 불가 -> skip
+    // rule j (1..len-1): suffix [ids[0..j-1]] 일치 시 ids[j] boost.
+    for (size_t j = 1; j < ids.size(); ++j) {
+      if (j < entry.min_prefix_len)
+        continue;  // 매칭 길이 j 가 min_prefix_len 미만이면 제외
+      Node* node = &_root;
+      // reverse-prefix: ids[j-1], ids[j-2], ..., ids[0]
+      for (size_t k = j; k-- > 0; )
+        node = &node->children[ids[k]];
+      node->actions.emplace_back(ids[j], entry.step_bias);
+    }
+  }
+
+  void PhraseBiasTrie::lookup(const int32_t* tail, dim_t tail_len,
+                              std::map<size_t, float>& out) const {
+    const Node* node = &_root;
+    for (dim_t k = tail_len; k-- > 0; ) {
+      auto it = node->children.find(static_cast<size_t>(tail[k]));
+      if (it == node->children.end())
+        break;
+      node = &it->second;
+      for (const auto& action : node->actions)
+        out[action.first] += action.second;  // 합산 (overlap)
+    }
+  }
+
+
   NoRepeatNgram::NoRepeatNgram(const size_t ngram_size)
     : _ngram_size(ngram_size)
   {
