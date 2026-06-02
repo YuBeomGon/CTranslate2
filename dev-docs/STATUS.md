@@ -3,13 +3,13 @@
 > task 완료(테스트 통과 + 리뷰) 시마다 `- [ ]` → `- [x]` 체크하고 commit SHA 기록 후 커밋.
 > 스펙 = [`SSOT.md`](SSOT.md) · P1 상세 = [`p1-impl-plan.md`](p1-impl-plan.md)
 
-## Phase 1 — CPU positive bias + reverse trie  ⏳ 진행 중
+## Phase 1 — CPU positive bias + reverse trie  ✅ 완료
 - [x] (사전) feature 브랜치 + 데이터 모델 `whisper.h`            `34e52dd`
-- [ ] P1-T1  `indexed_add` CPU primitive (+ test)
-- [ ] P1-T2  `PhraseBiasEntry` + reverse trie (build/lookup)
-- [ ] P1-T3  `PhraseBiasProcessor` CPU apply (합산+clamp, synthetic logits)
-- [ ] P1-T4  generate 주입 + empty no-op 회귀
-- [ ] **P1 완료 게이트**: 전체 C++ 테스트 통과 (baseline Gemm 3개 제외)
+- [x] P1-T1  `indexed_add` CPU primitive (+ test)                  `975e26f8`
+- [x] P1-T2  `PhraseBiasEntry` + reverse trie (build/lookup)       `16ad7611`
+- [x] P1-T3  `PhraseBiasProcessor` CPU apply (합산+clamp, synthetic logits)  `155ace85`
+- [x] P1-T4  generate 주입 + empty no-op 회귀                      `e849bea6`
+- [x] **P1 완료 게이트**: 전체 C++ 테스트 통과 (baseline Gemm 3개 제외) — 194 passed
 
 ## Phase 2 — GPU `indexed_add` (parity)  ⬜ 대기
 - [ ] CUDA `indexed_add` (`indexed_fill` 패턴, unique index)
