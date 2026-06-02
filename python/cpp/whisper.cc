@@ -115,6 +115,45 @@ namespace ctranslate2 {
 
 
     void register_whisper(py::module& m) {
+      py::class_<models::PhraseBiasPath>(
+        m, "PhraseBiasPath",
+        "One tokenization path of a phrase: token ids and precomputed continuation bias.")
+        .def(py::init([](std::vector<size_t> ids, float step_bias, uint16_t min_prefix_len) {
+               models::PhraseBiasPath path;
+               path.ids = std::move(ids);
+               path.step_bias = step_bias;
+               path.min_prefix_len = min_prefix_len;
+               return path;
+             }),
+             py::arg("ids"),
+             py::kw_only(),
+             py::arg("step_bias") = 0.f,
+             py::arg("min_prefix_len") = 1,
+             "Build a path from token ids and a precomputed per-step bias.")
+        .def_readwrite("ids", &models::PhraseBiasPath::ids)
+        .def_readwrite("step_bias", &models::PhraseBiasPath::step_bias)
+        .def_readwrite("min_prefix_len", &models::PhraseBiasPath::min_prefix_len)
+        .def("__repr__", [](const models::PhraseBiasPath& path) {
+          return "PhraseBiasPath(ids=" + std::string(py::repr(py::cast(path.ids)))
+            + ", step_bias=" + std::to_string(path.step_bias)
+            + ", min_prefix_len=" + std::to_string(path.min_prefix_len) + ")";
+        });
+
+      py::class_<models::PhraseBias>(
+        m, "PhraseBias",
+        "A surface form compiled to one or more token paths.")
+        .def(py::init([](std::vector<models::PhraseBiasPath> token_paths) {
+               models::PhraseBias bias;
+               bias.token_paths = std::move(token_paths);
+               return bias;
+             }),
+             py::arg("token_paths"))
+        .def_readwrite("token_paths", &models::PhraseBias::token_paths)
+        .def("__repr__", [](const models::PhraseBias& bias) {
+          return "PhraseBias(token_paths="
+            + std::string(py::repr(py::cast(bias.token_paths))) + ")";
+        });
+
       py::class_<models::WhisperGenerationResult>(m, "WhisperGenerationResult",
                                                   "A generation result from the Whisper model.")
 

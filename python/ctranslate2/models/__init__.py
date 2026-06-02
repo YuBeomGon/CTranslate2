@@ -4,6 +4,8 @@ and :class:`ctranslate2.Generator`.
 
 try:
     from ctranslate2._ext import (
+        PhraseBias,
+        PhraseBiasPath,
         Wav2Vec2,
         Wav2Vec2Bert,
         Whisper,
