@@ -157,6 +157,26 @@ namespace ctranslate2 {
     Node _root;
   };
 
+  // Positive continuation phrase bias. apply_first()=false so it runs after no-speech.
+  class PhraseBiasProcessor : public LogitsProcessor {
+  public:
+    explicit PhraseBiasProcessor(const std::vector<PhraseBiasEntry>& entries,
+                                 float max_token_delta = 1.0f);
+
+    bool apply_first() const override { return false; }
+
+    void apply(dim_t step,
+               StorageView& logits,
+               DisableTokens& disable_tokens,
+               const StorageView& sequences,
+               const std::vector<dim_t>& batch_offset,
+               const std::vector<std::vector<size_t>>* prefix) override;
+
+  private:
+    PhraseBiasTrie _trie;
+    float _max_token_delta;
+  };
+
   // Disable the generation of some sequences of tokens.
   class SuppressSequences : public LogitsProcessor {
   public:

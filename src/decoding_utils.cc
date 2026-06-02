@@ -97,6 +97,54 @@ namespace ctranslate2 {
   }
 
 
+  PhraseBiasProcessor::PhraseBiasProcessor(const std::vector<PhraseBiasEntry>& entries,
+                                           float max_token_delta)
+    : _max_token_delta(max_token_delta) {
+    for (const auto& entry : entries)
+      _trie.add(entry);  // 1-token/min_prefix_len 필터는 trie.add 내부
+  }
+
+  void PhraseBiasProcessor::apply(dim_t,
+                                  StorageView& logits,
+                                  DisableTokens&,
+                                  const StorageView& sequences,
+                                  const std::vector<dim_t>&,
+                                  const std::vector<std::vector<size_t>>*) {
+    if (!sequences)
+      return;  // step 0: 생성된 토큰 없음
+
+    const dim_t batch_size = logits.dim(0);
+    const dim_t vocab_size = logits.dim(-1);
+    const dim_t length = sequences.dim(1);
+
+    std::vector<int32_t> flat_indices;
+    std::vector<float> deltas;
+    for (dim_t b = 0; b < batch_size; ++b) {
+      const int32_t* row = sequences.index<int32_t>({b, 0});
+      std::map<size_t, float> boost;
+      _trie.lookup(row, length, boost);  // 합산
+      for (const auto& kv : boost) {
+        const float delta = std::min(kv.second, _max_token_delta);  // 최종 clamp
+        flat_indices.push_back(static_cast<int32_t>(b * vocab_size + kv.first));
+        deltas.push_back(delta);
+      }
+    }
+    if (flat_indices.empty())
+      return;
+
+    const Device device = logits.device();
+    const DataType dtype = logits.dtype();
+    StorageView indices({static_cast<dim_t>(flat_indices.size())}, flat_indices);
+    StorageView delta_view({static_cast<dim_t>(deltas.size())}, deltas);
+    indices = indices.to(device);
+    delta_view = delta_view.to(device).to(dtype);
+    DEVICE_AND_TYPE_DISPATCH(
+      device, dtype,
+      primitives<D>::indexed_add(logits.data<T>(), delta_view.data<T>(),
+                                 indices.data<int32_t>(), indices.size()));
+  }
+
+
   NoRepeatNgram::NoRepeatNgram(const size_t ngram_size)
     : _ngram_size(ngram_size)
   {

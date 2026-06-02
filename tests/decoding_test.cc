@@ -67,3 +67,47 @@ TEST(PhraseBiasTest, TrieSkipsTooShortEntry) {
   trie.lookup(std::vector<int32_t>{5}.data(), 1, out);
   EXPECT_TRUE(out.empty());
 }
+
+TEST(PhraseBiasTest, ProcessorBoostsNextTokenOnSuffixMatch) {
+  // vocab=5, batch=1. logits 모두 0.
+  StorageView logits({1, 5}, std::vector<float>(5, 0.f));
+  DisableTokens disable(logits, std::numeric_limits<float>::lowest());
+
+  std::vector<PhraseBiasEntry> entries = {{{1, 2, 3}, 0.25f, 1}};  // [A=1,B=2,C=3]
+  PhraseBiasProcessor proc(entries);
+
+  StorageView seq({1, 1}, std::vector<int32_t>{1});  // suffix [A]
+  proc.apply(1, logits, disable, seq, {0}, nullptr);
+
+  StorageView expected({1, 5}, std::vector<float>{0, 0, 0.25f, 0, 0});  // token 2(B) += 0.25
+  expect_storage_eq(logits, expected);
+}
+
+TEST(PhraseBiasTest, ProcessorOverlapSumsAndClamps) {
+  StorageView logits({1, 5}, std::vector<float>(5, 0.f));
+  DisableTokens disable(logits, std::numeric_limits<float>::lowest());
+  // 두 phrase 모두 [A]->B boost: 0.6 + 0.6 = 1.2 -> clamp 1.0
+  std::vector<PhraseBiasEntry> entries = {{{1, 2}, 0.6f, 1}, {{1, 2}, 0.6f, 1}};
+  PhraseBiasProcessor proc(entries, /*max_token_delta=*/1.0f);
+  StorageView seq({1, 1}, std::vector<int32_t>{1});
+  proc.apply(1, logits, disable, seq, {0}, nullptr);
+  StorageView expected({1, 5}, std::vector<float>{0, 0, 1.0f, 0, 0});
+  expect_storage_eq(logits, expected);
+}
+
+TEST(PhraseBiasTest, ProcessorNoMatchAndNullAreNoOp) {
+  std::vector<PhraseBiasEntry> entries = {{{1, 2, 3}, 0.25f, 1}};
+  PhraseBiasProcessor proc(entries);
+  // 불일치
+  StorageView logits1({1, 5}, std::vector<float>(5, 0.f));
+  DisableTokens d1(logits1, std::numeric_limits<float>::lowest());
+  StorageView seq({1, 1}, std::vector<int32_t>{7});
+  proc.apply(1, logits1, d1, seq, {0}, nullptr);
+  expect_storage_eq(logits1, StorageView({1, 5}, std::vector<float>(5, 0.f)));
+  // null sequences (step 0)
+  StorageView logits2({1, 5}, std::vector<float>(5, 0.f));
+  DisableTokens d2(logits2, std::numeric_limits<float>::lowest());
+  StorageView empty;
+  proc.apply(0, logits2, d2, empty, {0}, nullptr);
+  expect_storage_eq(logits2, StorageView({1, 5}, std::vector<float>(5, 0.f)));
+}
