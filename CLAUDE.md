@@ -11,25 +11,16 @@ STT(음성 인식) 용도로 커스텀 수정을 진행합니다.
 
 ## 이 포크의 목적
 
-CTranslate2의 **Whisper 디코더에 도메인 용어 phrase bias**를 추가한다.
+CTranslate2의 **Whisper 디코더에 도메인 용어 positive phrase bias**를 추가한다.
+문장 아무 위치에서 도메인 phrase가 나오려 할 때 **다음 token logit에 positive bias**를 줘서 recall↑.
+(negative/suppress는 보류.) 기존 `LogitsProcessor` 파이프라인에 `PhraseBiasProcessor`를 additive 주입.
 
-- **positive bias** → 도메인 정답 용어(예: "트랜스포머") recall ↑
-- **negative bias** → 자주 나는 오인식(예: "트랜스퍼머") 억제 ↓
+> **모든 결정·범위·금지사항·테스트·구현 참조는 [`dev-docs/SSOT.md`](dev-docs/SSOT.md) 하나에 통합되어 있다. 작업 전 SSOT를 먼저, 끝까지 읽어라.**
 
-faster-whisper의 `hotwords`는 prompt hint라 next-token score를 직접 못 건드린다.
-정확한 score-level 제어를 위해 기존 `LogitsProcessor` 파이프라인에 `PhraseBiasProcessor`를
-**additive하게 주입**한다 (모델 포맷 변경·monkey patch 아님).
+## 커스텀 문서
 
-> 설계·결정·파일맵·API는 전부 [`dev-docs/SSOT.md`](dev-docs/SSOT.md)에 있다. **작업 전 SSOT를 먼저 읽어라.**
-
-## 커스텀 문서 (Claude가 작업 전 참고)
-
-- [`dev-docs/SSOT.md`](dev-docs/SSOT.md) — **단일 진실 공급원**. 목적·설계 결정·수정 파일맵·API·가드레일·로드맵. (가장 먼저 읽기)
-- [`dev-docs/impl-plan.md`](dev-docs/impl-plan.md) — 구현 플랜 (Phase 1 block MVP, TDD). 구현 시 이걸로 진행
-- [`dev-docs/testing-manual.md`](dev-docs/testing-manual.md) — 구현 후 vanilla vs fork A/B 검증 매뉴얼
-- [`dev-docs/deep-research-report.md`](dev-docs/deep-research-report.md) — 전체 설계 근거/분석/벤치마크 계획 (배경 자료)
-- [`dev-docs/changes.md`](dev-docs/changes.md) — upstream 대비 변경 내역 로그
-- [`dev-docs/upstream-sync.md`](dev-docs/upstream-sync.md) — upstream 동기화 절차와 주의점
+- [`dev-docs/SSOT.md`](dev-docs/SSOT.md) — **단일 진실 공급원** (통합 문서: 결정·로드맵·code map·금지사항·테스트·exemplar·검증)
+- `dev-docs/archive/` — 배경 리서치 + 이전 분절 문서 (참고용)
 
 ---
 
