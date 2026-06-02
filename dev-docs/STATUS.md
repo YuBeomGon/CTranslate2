@@ -11,10 +11,11 @@
 - [x] P1-T4  generate 주입 + empty no-op 회귀                      `e849bea6`
 - [x] **P1 완료 게이트**: 전체 C++ 테스트 통과 (baseline Gemm 3개 제외) — 194 passed
 
-## Phase 2 — GPU `indexed_add` (parity)  ⬜ 대기
-- [ ] CUDA `indexed_add` (`indexed_fill` 패턴, unique index)
-- [ ] CPU/GPU parity 테스트 (fp32 타이트 / fp16 tolerance / beam 1·5 / batch>1)
-- [ ] (plan 작성 필요)
+## Phase 2 — GPU `indexed_add` (parity)  ⬜ 대기  · plan: [`p2-impl-plan.md`](p2-impl-plan.md)
+- [ ] P2-T1  CUDA 빌드 디렉터리 셋업 (`build-cuda/`, WITH_CUDA=ON/CUDNN=OFF)
+- [ ] P2-T2  CUDA `indexed_add` 커널 + primitive parity (device-param fp32)
+- [ ] P2-T3  `PhraseBiasProcessor` CPU/GPU parity (CPU fp32 + CUDA fp32/fp16/bf16, batch>1, overlap)
+- [ ] **P2 완료 게이트**: CUDA 빌드 + CPU 빌드 전체 회귀 통과 (baseline Gemm 3개 제외)
 
 ## Phase 3 — Python binding + tokenizer compile  ⬜ 대기
 - [ ] `phrase_biases` / `phrase_bias_config` kwarg
