@@ -1,6 +1,7 @@
 #include "ctranslate2/decoding_utils.h"
 
 #include <set>
+#include <utility>
 
 #include "ctranslate2/ops/ops.h"
 #include "dispatch.h"
@@ -97,11 +98,25 @@ namespace ctranslate2 {
   }
 
 
+  std::shared_ptr<const PhraseBiasTrie>
+  build_phrase_bias_trie(const std::vector<PhraseBiasEntry>& entries) {
+    auto trie = std::make_shared<PhraseBiasTrie>();
+    for (const auto& entry : entries)
+      trie->add(entry);  // 1-token/min_prefix_len 필터는 trie.add 내부
+    return trie;
+  }
+
   PhraseBiasProcessor::PhraseBiasProcessor(const std::vector<PhraseBiasEntry>& entries,
                                            float max_token_delta)
-    : _max_token_delta(max_token_delta) {
-    for (const auto& entry : entries)
-      _trie.add(entry);  // 1-token/min_prefix_len 필터는 trie.add 내부
+    : PhraseBiasProcessor(build_phrase_bias_trie(entries), max_token_delta)
+  {
+  }
+
+  PhraseBiasProcessor::PhraseBiasProcessor(std::shared_ptr<const PhraseBiasTrie> trie,
+                                           float max_token_delta)
+    : _trie(std::move(trie))
+    , _max_token_delta(max_token_delta)
+  {
   }
 
   void PhraseBiasProcessor::apply(dim_t,
@@ -122,7 +137,7 @@ namespace ctranslate2 {
     for (dim_t b = 0; b < batch_size; ++b) {
       const int32_t* row = sequences.index<int32_t>({b, 0});
       std::map<size_t, float> boost;
-      _trie.lookup(row, length, boost);  // 합산
+      _trie->lookup(row, length, boost);  // 합산
       for (const auto& kv : boost) {
         const float delta = std::min(kv.second, _max_token_delta);  // 최종 clamp
         flat_indices.push_back(static_cast<int32_t>(b * vocab_size + kv.first));

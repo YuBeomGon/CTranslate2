@@ -128,6 +128,22 @@ TEST(PhraseBiasTest, ConvertModelOptionToEntries) {
   EXPECT_EQ(entries[0].min_prefix_len, 1u);
 }
 
+TEST(PhraseBiasTest, SharedTrieReusedByProcessors) {
+  std::vector<PhraseBiasEntry> entries = {{{1, 2, 3}, 0.25f, 1}};
+  std::shared_ptr<const PhraseBiasTrie> trie = build_phrase_bias_trie(entries);
+  ASSERT_TRUE(trie != nullptr);
+
+  for (int i = 0; i < 2; ++i) {
+    StorageView logits({1, 5}, std::vector<float>(5, 0.f));
+    DisableTokens disable(logits, std::numeric_limits<float>::lowest());
+    PhraseBiasProcessor proc(trie);
+    StorageView seq({1, 1}, std::vector<int32_t>{1});
+    proc.apply(1, logits, disable, seq, {0}, nullptr);
+    StorageView expected({1, 5}, std::vector<float>{0, 0, 0.25f, 0, 0});
+    expect_storage_eq(logits, expected);
+  }
+}
+
 // CPU/GPU parity: logits는 device/dtype, sequences는 host(int32) — 실제 generate 계약과 동일.
 class PhraseBiasProcessorFPTest : public ::testing::TestWithParam<FloatType> {
 };
