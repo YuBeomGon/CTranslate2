@@ -127,3 +127,47 @@ TEST(PhraseBiasTest, ConvertModelOptionToEntries) {
   EXPECT_FLOAT_EQ(entries[0].step_bias, 0.25f);
   EXPECT_EQ(entries[0].min_prefix_len, 1u);
 }
+
+// CPU/GPU parity: logits는 device/dtype, sequences는 host(int32) — 실제 generate 계약과 동일.
+class PhraseBiasProcessorFPTest : public ::testing::TestWithParam<FloatType> {
+};
+
+TEST_P(PhraseBiasProcessorFPTest, CpuGpuParity) {
+  const Device device = GetParam().device;
+  const DataType dtype = GetParam().dtype;
+  const float error = GetParam().error;
+
+  // batch=2 (row-wise batch>1 커버; beam end-to-end 아님), vocab=6, logits 모두 0.
+  StorageView logits({2, 6}, std::vector<float>(12, 0.f), device);
+  logits = logits.to(dtype);
+  DisableTokens disable(logits, std::numeric_limits<float>::lowest());
+
+  // shared prefix [1,2,*] 두 path → overlap 합산 검증.
+  std::vector<PhraseBiasEntry> entries = {
+    {{1, 2, 3}, 0.3f, 1},
+    {{1, 2, 4}, 0.3f, 1},
+  };
+  PhraseBiasProcessor proc(entries);
+
+  // sequences는 항상 host(CPU). row0 suffix [...,1] → token2 boost(0.3+0.3=0.6).
+  //                              row1 suffix [1,2]  → token3,4 boost(각 0.3).
+  StorageView seq({2, 2}, std::vector<int32_t>{0, 1,  1, 2});
+  proc.apply(2, logits, disable, seq, {0}, nullptr);
+
+  StorageView expected({2, 6}, std::vector<float>{
+      0, 0, 0.6f, 0,    0,    0,    // row0: token2 += 0.6 (합산)
+      0, 0, 0,    0.3f, 0.3f, 0},   // row1: token3,4 += 0.3
+      Device::CPU);
+  expect_storage_eq(logits, expected.to(device).to(dtype), error);
+}
+
+INSTANTIATE_TEST_SUITE_P(CPU, PhraseBiasProcessorFPTest,
+                         ::testing::Values(FloatType{Device::CPU, DataType::FLOAT32, 1e-5}),
+                         fp_test_name);
+#ifdef CT2_WITH_CUDA
+INSTANTIATE_TEST_SUITE_P(CUDA, PhraseBiasProcessorFPTest,
+                         ::testing::Values(FloatType{Device::CUDA, DataType::FLOAT32, 1e-5},
+                                           FloatType{Device::CUDA, DataType::FLOAT16, 1e-2},
+                                           FloatType{Device::CUDA, DataType::BFLOAT16, 4e-2}),
+                         fp_test_name);
+#endif
