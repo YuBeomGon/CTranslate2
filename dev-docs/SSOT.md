@@ -56,7 +56,7 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 | **P1** | **CPU positive phrase bias + reverse trie** — leading-space correctness, start_bias 없음, total_bias 분배, canonical top-1 path | C++ 단위 테스트. whisper-tiny A/B로 recall↑ 실측 |
 | **P2** | **GPU sparse `indexed_add`** — 기존 primitive 패턴 따름 | **CPU와 동일 결과(parity)**, float32/float16, beam 1/5 |
 | **P3** | **Python binding + tokenizer compile** — 문자열+total_bias 입력, special 제거, leading-space 유지 | encode/decode 검증 테스트 |
-| **P4** | **faster-whisper / WhisperLiveKit init-time 연동** | 도메인 모델 init 시 baking |
+| **P4** | **faster-whisper init-time 연동** | 도메인 모델 init 시 baking |
 | 보류 | negative/suppress (block) | — |
 
 ## 5. Code Map (수정 대상)

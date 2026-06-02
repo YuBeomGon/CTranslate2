@@ -92,7 +92,7 @@
 
 ---
 
-## Phase 4 — faster-whisper / WhisperLiveKit init-time 연동
+## Phase 4 — faster-whisper init-time 연동
 
 - 도메인별 모델 init 시 custom vocabulary → token paths → trie compile → 이후 decode 재사용.
 - streaming: partial은 약하게/off, final/2-pass에 정상 bias (MVP는 final/2-pass만 가능).
