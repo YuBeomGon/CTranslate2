@@ -12,6 +12,7 @@
 |------|------|
 | [`SSOT.md`](SSOT.md) | **단일 진실 공급원** — positive phrase bias 결정·금지사항·code map·로드맵·acceptance test |
 | [`impl-plan.md`](impl-plan.md) | 구현 플랜 (Phase 1 CPU+trie, 작은 acceptance-test 단위) + Phase 2~4 |
+| [`ct2-reference-map.md`](ct2-reference-map.md) | 구현 시 따라할 **기존 CT2 코드 exemplar 위치** (file:line, GPU 포함) |
 | [`testing-manual.md`](testing-manual.md) | 구현 후 vanilla vs fork 실제 음성 A/B 검증 |
 | [`changes.md`](changes.md) | 변경 내역 로그 |
 | [`upstream-sync.md`](upstream-sync.md) | upstream(OpenNMT 본가) 동기화 절차 |

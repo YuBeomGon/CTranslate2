@@ -45,7 +45,7 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 3. **leading-space 제거 금지** — `" 트랜스포머"`의 앞 공백 마커는 유지. special token만 제거.
 4. **매 generate마다 trie 재생성 금지** — init-time 1회 compile, 이후 lookup만.
 5. **`phrase_biases` 비면 processor 생성 금지** — empty = no-op, 기존 path 그대로.
-6. **새 CUDA 스타일 만들기 금지** — GPU는 기존 CT2 primitive(`DisableTokens`, `RepetitionPenalty`, `indexed_fill`, gather/scatter) 패턴을 **먼저 조사하고 재사용**.
+6. **새 CUDA 스타일 만들기 금지** — GPU는 기존 CT2 primitive(`DisableTokens`, `RepetitionPenalty`, `indexed_fill`, gather/scatter) 패턴을 **먼저 조사하고 재사용**. 검증된 exemplar 위치는 [`ct2-reference-map.md`](ct2-reference-map.md) (`indexed_add`는 `indexed_fill`을 `=`→`+=`로 복사).
 
 ## 4. 단계별 로드맵
 
