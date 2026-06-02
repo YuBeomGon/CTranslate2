@@ -111,3 +111,19 @@ TEST(PhraseBiasTest, ProcessorNoMatchAndNullAreNoOp) {
   proc.apply(0, logits2, d2, empty, {0}, nullptr);
   expect_storage_eq(logits2, StorageView({1, 5}, std::vector<float>(5, 0.f)));
 }
+
+TEST(PhraseBiasTest, ConvertModelOptionToEntries) {
+  using namespace ctranslate2::models;
+  std::vector<PhraseBias> biases(1);
+  PhraseBiasPath p;
+  p.ids = {1, 2, 3};
+  p.step_bias = 0.25f;
+  p.min_prefix_len = 1;
+  biases[0].token_paths.push_back(p);
+
+  std::vector<ctranslate2::PhraseBiasEntry> entries = to_phrase_bias_entries(biases);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].ids, (std::vector<size_t>{1, 2, 3}));
+  EXPECT_FLOAT_EQ(entries[0].step_bias, 0.25f);
+  EXPECT_EQ(entries[0].min_prefix_len, 1u);
+}

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "ctranslate2/decoding_utils.h"
 #include "ctranslate2/generation.h"
 #include "ctranslate2/layers/whisper.h"
 #include "ctranslate2/models/model.h"
@@ -29,6 +30,10 @@ namespace ctranslate2 {
     struct PhraseBias {
       std::vector<PhraseBiasPath> token_paths;
     };
+
+    // Flatten model-level phrase biases into low-level, model-agnostic entries.
+    std::vector<PhraseBiasEntry>
+    to_phrase_bias_entries(const std::vector<PhraseBias>& phrase_biases);
 
     struct WhisperOptions {
       // Beam size to use for beam search (set 1 to run greedy search).

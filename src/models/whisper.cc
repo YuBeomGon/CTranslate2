@@ -229,6 +229,21 @@ namespace ctranslate2 {
       }
     };
 
+    std::vector<PhraseBiasEntry>
+    to_phrase_bias_entries(const std::vector<PhraseBias>& phrase_biases) {
+      std::vector<PhraseBiasEntry> entries;
+      for (const auto& bias : phrase_biases) {
+        for (const auto& path : bias.token_paths) {
+          PhraseBiasEntry entry;
+          entry.ids = path.ids;
+          entry.step_bias = path.step_bias;
+          entry.min_prefix_len = path.min_prefix_len;
+          entries.emplace_back(std::move(entry));
+        }
+      }
+      return entries;
+    }
+
     std::vector<WhisperGenerationResult>
     WhisperReplica::generate(StorageView features,
                              const std::vector<std::vector<size_t>>& prompts,
@@ -339,6 +354,13 @@ namespace ctranslate2 {
                                                 timestamp_begin_id,
                                                 timestamp_end_id,
                                                 max_initial_timestamp_id));
+      }
+
+      if (!options.phrase_biases.empty()) {
+        auto entries = to_phrase_bias_entries(options.phrase_biases);
+        if (!entries.empty())
+          decoding_options.logits_processors.emplace_back(
+            std::make_shared<PhraseBiasProcessor>(entries));
       }
 
       std::vector<DecodingResult> results = decode(*_decoder,
