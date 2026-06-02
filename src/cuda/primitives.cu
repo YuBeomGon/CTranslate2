@@ -67,6 +67,37 @@ namespace ctranslate2 {
     THRUST_CALL(thrust::fill, it, it + num_indices, cuda::device_type<T>(a));
   }
 
+  template <typename T>
+  __global__ void indexed_add_kernel(T* x,
+                                     const T* deltas,
+                                     const int32_t* indices,
+                                     cuda::index_t num_indices) {
+    for (cuda::index_t i = blockIdx.x * blockDim.x + threadIdx.x;
+         i < num_indices;
+         i += blockDim.x * gridDim.x) {
+      const cuda::index_t idx = indices[i];
+      // unique index 계약(SSOT §7-7)이라 동일 idx 동시 쓰기 없음 → race 없음 → atomic 불필요.
+      // half/bf16는 penalize_previous_tokens_kernel과 동일하게 float 경유.
+      const float updated = static_cast<float>(x[idx]) + static_cast<float>(deltas[i]);
+      x[idx] = updated;
+    }
+  }
+
+  template<>
+  template <typename T>
+  void primitives<Device::CUDA>::indexed_add(T* x, const T* deltas,
+                                             const int32_t* indices, dim_t num_indices) {
+    if (num_indices == 0)
+      return;
+    dim3 block(32);  // penalize_previous_tokens launch와 동일. <100개 scatter라 perf 무관 — 일관성 위해 32.
+    dim3 grid((num_indices + block.x - 1) / block.x);
+    indexed_add_kernel<<<grid, block, 0, cuda::get_cuda_stream()>>>(
+      cuda::device_cast(x),
+      cuda::device_cast(deltas),
+      indices,
+      num_indices);
+  }
+
   template<>
   template <typename T>
   void primitives<Device::CUDA>::copy(const T* x, T* y, dim_t size) {
@@ -760,6 +791,8 @@ namespace ctranslate2 {
   primitives<Device::CUDA>::strided_fill(T* x, T a, dim_t inc_x, dim_t size); \
   template void                                                         \
   primitives<Device::CUDA>::indexed_fill(T*, T, const int32_t*, dim_t); \
+  template void                                                         \
+  primitives<Device::CUDA>::indexed_add(T*, const T*, const int32_t*, dim_t); \
   template void                                                         \
   primitives<Device::CUDA>::copy<T>(const T* x, T* y, dim_t size);      \
   template T                                                            \

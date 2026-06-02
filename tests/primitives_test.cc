@@ -51,13 +51,17 @@ TEST_P(PrimitiveTest, PenalizePreviousTokens) {
   expect_storage_eq(scores, expected);
 }
 
-TEST(IndexedAddTest, CPU) {
-  std::vector<float> x = {0, 1, 2, 3, 4};
-  std::vector<float> deltas = {0.5f, 0.25f};
-  std::vector<int32_t> indices = {1, 3};
-  primitives<Device::CPU>::indexed_add(x.data(), deltas.data(), indices.data(), 2);
-  std::vector<float> expected = {0, 1.5f, 2, 3.25f, 4};
-  EXPECT_EQ(x, expected);
+TEST_P(PrimitiveTest, IndexedAdd) {
+  const Device device = GetParam();
+  StorageView x({5}, std::vector<float>{0, 1, 2, 3, 4}, device);
+  StorageView deltas({2}, std::vector<float>{0.5f, 0.25f}, device);
+  StorageView indices({2}, std::vector<int32_t>{1, 3}, device);
+  StorageView expected({5}, std::vector<float>{0, 1.5f, 2, 3.25f, 4}, device);
+  DEVICE_DISPATCH(device, primitives<D>::indexed_add(x.data<float>(),
+                                                     deltas.data<float>(),
+                                                     indices.data<int32_t>(),
+                                                     indices.size()));
+  expect_storage_eq(x, expected);
 }
 
 INSTANTIATE_TEST_SUITE_P(CPU, PrimitiveTest, ::testing::Values(Device::CPU));
