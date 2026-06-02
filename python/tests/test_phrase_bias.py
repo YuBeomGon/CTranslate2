@@ -24,3 +24,8 @@ def test_phrase_bias_wraps_paths():
     b = ctranslate2.models.PhraseBias(token_paths=[p1, p2])
     assert len(b.token_paths) == 2
     assert list(b.token_paths[0].ids) == [100, 200, 300]
+
+
+def test_whisper_ctor_and_generate_expose_phrase_biases():
+    assert "phrase_biases" in (ctranslate2.models.Whisper.__init__.__doc__ or "")
+    assert "phrase_biases" in (ctranslate2.models.Whisper.generate.__doc__ or "")

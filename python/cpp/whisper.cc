@@ -9,7 +9,34 @@ namespace ctranslate2 {
 
     class WhisperWrapper : public ReplicaPoolHelper<models::Whisper> {
     public:
-      using ReplicaPoolHelper::ReplicaPoolHelper;
+      WhisperWrapper(const std::string& model_path,
+                     const std::string& device,
+                     const std::variant<int, std::vector<int>>& device_index,
+                     const StringOrMap& compute_type,
+                     size_t inter_threads,
+                     size_t intra_threads,
+                     long max_queued_batches,
+                     bool flash_attention,
+                     bool tensor_parallel,
+                     py::object files,
+                     const std::optional<std::vector<models::PhraseBias>>& phrase_biases)
+        : ReplicaPoolHelper<models::Whisper>(model_path,
+                                             device,
+                                             device_index,
+                                             compute_type,
+                                             inter_threads,
+                                             intra_threads,
+                                             max_queued_batches,
+                                             flash_attention,
+                                             tensor_parallel,
+                                             files)
+      {
+        if (phrase_biases && !phrase_biases->empty()) {
+          auto entries = models::to_phrase_bias_entries(*phrase_biases);
+          if (!entries.empty())
+            _compiled_trie = build_phrase_bias_trie(entries);
+        }
+      }
 
       bool is_multilingual() const {
         return _pool->is_multilingual();
@@ -46,7 +73,8 @@ namespace ctranslate2 {
                bool suppress_blank,
                const std::optional<std::vector<int>>& suppress_tokens,
                size_t sampling_topk,
-               float sampling_temperature) {
+               float sampling_temperature,
+               const std::optional<std::vector<models::PhraseBias>>& phrase_biases) {
         std::vector<std::future<models::WhisperGenerationResult>> futures;
 
         models::WhisperOptions options;
@@ -69,6 +97,13 @@ namespace ctranslate2 {
           options.suppress_tokens = suppress_tokens.value();
         else
           options.suppress_tokens.clear();
+
+        if (phrase_biases) {
+          options.phrase_biases = *phrase_biases;
+        } else {
+          options.compiled_phrase_bias_trie = _compiled_trie;
+        }
+
         std::shared_lock lock(_mutex);
         assert_model_is_ready();
 
@@ -111,6 +146,9 @@ namespace ctranslate2 {
                                     median_filter_width);
         return wait_on_futures(std::move(futures));
       }
+
+    private:
+      std::shared_ptr<const PhraseBiasTrie> _compiled_trie;
     };
 
 
@@ -213,7 +251,17 @@ namespace ctranslate2 {
         .def_property_readonly("num_languages", &WhisperWrapper::num_languages,
                                "Returns the number of languages supported.")
 
-        .def(py::init<const std::string&, const std::string&, const std::variant<int, std::vector<int>>&, const StringOrMap&, size_t, size_t, long, bool, bool, py::object>(),
+        .def(py::init<const std::string&,
+                      const std::string&,
+                      const std::variant<int, std::vector<int>>&,
+                      const StringOrMap&,
+                      size_t,
+                      size_t,
+                      long,
+                      bool,
+                      bool,
+                      py::object,
+                      const std::optional<std::vector<models::PhraseBias>>&>(),
              py::arg("model_path"),
              py::arg("device")="cpu",
              py::kw_only(),
@@ -225,6 +273,7 @@ namespace ctranslate2 {
              py::arg("flash_attention")=false,
              py::arg("tensor_parallel")=false,
              py::arg("files")=py::none(),
+             py::arg("phrase_biases")=py::none(),
              R"pbdoc(
                  Initializes a Whisper model from a converted model.
 
@@ -245,6 +294,8 @@ namespace ctranslate2 {
                    files: Load model files from the memory. This argument is a dictionary mapping
                      file names to file contents as file-like or bytes objects. If this is set,
                      :obj:`model_path` acts as an identifier for this model.
+                   phrase_biases: Optional phrase bias list compiled once at model construction
+                     and reused by calls where :obj:`phrase_biases` is not set.
              )pbdoc")
 
         .def_property_readonly("device", &WhisperWrapper::device,
@@ -298,6 +349,7 @@ namespace ctranslate2 {
              py::arg("suppress_tokens")=std::vector<int>{-1},
              py::arg("sampling_topk")=1,
              py::arg("sampling_temperature")=1,
+             py::arg("phrase_biases")=py::none(),
              py::call_guard<py::gil_scoped_release>(),
              R"pbdoc(
                  Encodes the input features and generates from the given prompt.
@@ -330,6 +382,10 @@ namespace ctranslate2 {
                      of symbols as defined in the model ``config.json`` file.
                    sampling_topk: Randomly sample predictions from the top K candidates.
                    sampling_temperature: Sampling temperature to generate more random samples.
+                   phrase_biases: Optional call-level phrase bias list. ``None`` reuses the
+                     model-level compiled phrase biases when available, an empty list disables
+                     phrase biasing for this call, and a non-empty list overrides the model-level
+                     configuration for this call.
 
                  Returns:
                    A list of generation results.
