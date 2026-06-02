@@ -19,6 +19,7 @@ TEST(DecodingTest, DisableTokens) {
 TEST(PhraseBiasTest, WhisperOptionsDefaultsEmpty) {
   ctranslate2::models::WhisperOptions options;
   EXPECT_TRUE(options.phrase_biases.empty());
+  EXPECT_EQ(options.compiled_phrase_bias_trie, nullptr);
 }
 
 TEST(PhraseBiasTest, PhraseBiasPathDefaults) {

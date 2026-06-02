@@ -86,6 +86,10 @@ namespace ctranslate2 {
 
       // Phrase-level bias on domain terms. Empty = disabled (no overhead).
       std::vector<PhraseBias> phrase_biases;
+
+      // Pre-compiled trie (built once at load time). If set, used directly without
+      // rebuilding per generate. Takes precedence over phrase_biases.
+      std::shared_ptr<const PhraseBiasTrie> compiled_phrase_bias_trie;
     };
 
     struct WhisperGenerationResult {

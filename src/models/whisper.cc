@@ -356,12 +356,12 @@ namespace ctranslate2 {
                                                 max_initial_timestamp_id));
       }
 
-      if (!options.phrase_biases.empty()) {
-        auto entries = to_phrase_bias_entries(options.phrase_biases);
-        if (!entries.empty())
-          decoding_options.logits_processors.emplace_back(
-            std::make_shared<PhraseBiasProcessor>(entries));
-      }
+      std::shared_ptr<const PhraseBiasTrie> bias_trie = options.compiled_phrase_bias_trie;
+      if (!bias_trie && !options.phrase_biases.empty())
+        bias_trie = build_phrase_bias_trie(to_phrase_bias_entries(options.phrase_biases));
+      if (bias_trie)
+        decoding_options.logits_processors.emplace_back(
+          std::make_shared<PhraseBiasProcessor>(bias_trie));
 
       std::vector<DecodingResult> results = decode(*_decoder,
                                                    state,
