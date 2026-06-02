@@ -7,6 +7,7 @@
 CMake*.json
 .idea
 python/build/
+python/ctranslate2/_ext*.so
 python/ctranslate2.egg-info/
 python/dist/
 .cache
