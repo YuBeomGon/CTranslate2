@@ -51,7 +51,7 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 | 1-token phrase | **skip + 경고 로그** (continuation 불가, start_bias=0이라 bias 0) |
 | 매칭 구조 | **reverse trie** (suffix 역방향 탐색). naive scan과 결과 동일, 성능용 |
 | primitive | soft bias는 **항상 `indexed_add` primitive를 dispatch 경유로 호출**. **P1에 CPU 구현, P2에 CUDA만 추가 → 인터페이스 불변**. `indexed_add`는 **unique index만** 받음(§7-7). dedupe/합산은 processor가 호출 전에 수행 |
-| compile 시점 | 키워드→ids compile은 **faster-whisper init 1회**(도메인 모델당), 결과를 CT2에 넘김. CT2는 그 entries로 trie build. chunk/generate마다 재토크나이즈 **금지** |
+| compile 시점 | 키워드→ids compile은 **faster-whisper init 1회**(도메인 모델당) → `Whisper(phrase_biases=...)` 생성자로 전달 → **CT2가 trie를 1회 build해 WhisperWrapper에 persistent 보관**(P3). generate는 cached trie 참조, **재토크나이즈·trie rebuild 금지**. ⚠️ P1/P2 구현은 generate마다 rebuild했음(임시) → **P3에서 load-time persistent로 닫음** |
 | compiled bias 관리 | `model_id`/`tokenizer_hash`/`vocab_size`/`config_version`와 묶음 (model 바뀌면 재compile) |
 | empty option | `phrase_biases` 비면 **processor 생성 안 함** → 기존 decode와 결과/속도 동일 |
 | 배포 | 도메인/고객사별 모델 로딩 → vocab을 모델 init에 baking. private wheel/Docker, rollback = flag off |
@@ -119,11 +119,12 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 |-------|------|---------|
 | **P1** ✅ | CPU positive bias + **reverse trie** — start_bias 없음, total_bias 분배, canonical top-1 (ids 입력) | C++ 단위 테스트 통과 |
 | **P2** ✅ | GPU sparse `indexed_add` — 기존 primitive 패턴 재사용 | **CPU/GPU parity** (fp32 타이트, fp16/bf16 tolerance), batch>1, portable 멀티-arch |
-| **P3** | **CT2 Python binding만** — `PhraseBias*`를 pybind 노출 + `generate(phrase_biases=...)` kwarg. **ids+step_bias in, 토크나이저 없음** | 바인딩 왕복(py list/dict→C++→동작) + empty no-op + whisper-tiny generate 통합 |
-| **P4** | **faster-whisper 연동 (tokenizer compile 포함)** — init 시 자기 토크나이저로 키워드→2 path compile(special 제거·leading-space·roundtrip 검증·step_bias) → `phrase_biases`로 CT2 generate 전달 | tokenizer correctness(pure 함수) + 실제 음성 A/B recall↑ |
+| **P3** | **CT2 Python binding + load-time persistent trie** — `PhraseBias*` pybind 노출, `Whisper(..., phrase_biases=[...])` **생성자 주입**(compile된 trie를 WhisperWrapper에 1회 build/보관), generate가 cached trie 참조(rebuild 없음). `generate(phrase_biases=...)` per-call override도 지원. **ids+step_bias in, 토크나이저 없음** | 바인딩 왕복 + empty no-op + whisper-tiny 효과(생성자/per-call 둘 다) |
+| **P4** | **faster-whisper 연동 (tokenizer compile 포함)** — init 시 자기 토크나이저로 키워드→2 path compile(special 제거·leading-space·roundtrip 검증·step_bias) → `Whisper(phrase_biases=...)` 생성자로 전달 | tokenizer correctness(pure 함수) + 실제 음성 A/B recall↑ |
 | 보류 | negative/suppress (block) | — |
 
-> ⚠️ **tokenizer compile은 P3가 아니라 P4** (§0.1). CT2엔 토크나이저가 없으므로 문자열→ids는 faster-whisper에서. P3는 그 결과를 받는 통로만.
+> ⚠️ **tokenizer compile은 P3가 아니라 P4** (§0.1). CT2엔 토크나이저가 없으므로 문자열→ids는 faster-whisper에서. P3는 그 결과(ids+bias)를 받아 **trie를 1회 build해 persistent 보관**.
+> **trie 보관 위치 결정(P3):** replica가 아니라 **WhisperWrapper(per-Whisper-object)** 에 `shared_ptr<const PhraseBiasTrie>` 보관 → generate마다 `WhisperOptions.compiled_phrase_bias_trie`로 **read-only 주입**(replica는 읽기만 → ReplicaPool race 없음, lock 불필요). 생성자 주입이라 immutable. **mutable setter는 보류**(replica race·불필요).
 
 권장 실행 순서: ① CPU trie processor ✅ → ② CPU 테스트 ✅ → ③ GPU indexed_add ✅ → ④ CPU/GPU parity ✅ → ⑤ **CT2 Python binding(ids+bias)** → ⑥ **faster-whisper(tokenizer compile + A/B)**.
 
@@ -136,10 +137,13 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 | `src/decoding_utils.cc` | trie build + per-step suffix lookup + soft bias apply (CPU) | P1 |
 | `src/models/whisper.cc` | 옵션→entry 변환 + `logits_processors` 주입 (no-speech 후, empty면 skip) | P1/P3 |
 | `include/ctranslate2/primitives.h`, `src/cpu/primitives.cc`, `src/cuda/primitives.cu` | `indexed_add` (CPU 먼저, GPU 다음) | P1(CPU)/P2(GPU) |
-| `python/cpp/whisper.cc` | `PhraseBiasMode/Path/Bias` pybind `py::class_` 노출 + `generate(phrase_biases=...)` kwarg (suppress_tokens 패턴). **ids+bias만, 토크나이저 X** | P3 |
-| `python/tests/` | 바인딩 왕복 + empty no-op + generate 통합 테스트 | P3 |
-| `tests/decoding_test.cc` | acceptance tests | P1 |
-| **(faster-whisper repo, 별도)** | 키워드→2 path compile(pure 함수, encode/decode 주입) + init 연동 + A/B | P4 |
+| `include/ctranslate2/decoding_utils.h`, `src/decoding_utils.cc` | `build_phrase_bias_trie(entries)→shared_ptr<const PhraseBiasTrie>` + `PhraseBiasProcessor(shared_ptr<const trie>)` ctor (기존 `(entries)` 편의 ctor는 delegating 유지). processor가 trie를 **shared_ptr로 보유** | P3 |
+| `include/ctranslate2/models/whisper.h` | `WhisperOptions.compiled_phrase_bias_trie` (`shared_ptr<const PhraseBiasTrie>`) 추가 | P3 |
+| `src/models/whisper.cc` | `WhisperReplica::generate`: `options.compiled_phrase_bias_trie` 있으면 그걸로 processor(**rebuild 없음**), 없고 `phrase_biases` 있으면 build(편의/C++ fallback) | P3 |
+| `python/cpp/whisper.cc` | `PhraseBiasPath/PhraseBias` pybind 노출 + **`WhisperWrapper`에 `_compiled_trie` 보관** + 생성자 `phrase_biases` kwarg(1회 compile) + `generate`가 per-call override 또는 `_compiled_trie`를 options에 주입 | P3 |
+| `python/tests/` | 바인딩 왕복 + empty no-op + 생성자/per-call 효과 통합 | P3 |
+| `tests/decoding_test.cc` | acceptance tests + shared-trie 공유 테스트 | P1/P3 |
+| **(faster-whisper repo, 별도)** | 키워드→2 path compile(pure 함수, encode/decode 주입) + `Whisper(phrase_biases=...)` 생성자 연동 + A/B | P4 |
 
 **저수준 타입 (plain, `decoding_utils.h`, models 의존 금지):**
 ```cpp
@@ -187,7 +191,7 @@ struct PhraseBiasEntry {
 | 3 | **reverse trie** (P1) | `[A,B,C]`,`[A,B,D]`,`[X,Y]`: suffix `[A]`→{B}, `[A,B]`→**{C,D}(공유 prefix 둘 다)**, `[X]`→{Y} |
 | 4 | **empty no-op** (P1) | phrase 없음 → processor 생성 안 됨 → 기존 결과·속도 동일 (회귀) |
 | 5 | **CPU/GPU parity** (P2) | 동일 logits/sequences/trie: fp32 타이트, **fp16 tolerance(allclose)**, beam 1/5, batch>1, overlap 합산 일치 |
-| 6 | **Whisper generate 통합** (P3, Python 바인딩) | whisper-tiny + dummy features로 `generate(phrase_biases=...)`가 ids+bias 받아 decode result 변경. empty no-op |
+| 6 | **Whisper generate 통합** (P3, Python 바인딩) | whisper-tiny로 (a) `Whisper(phrase_biases=...)` **생성자 주입** 출력 변경, (b) `generate(phrase_biases=...)` per-call override 출력 변경, (c) None/[] **empty no-op**, (d) shared trie가 generate마다 rebuild 안 됨(설계 보장) |
 | 7 | **실제 음성 A/B** (P4) | vanilla vs bias-on: domain recall + **precision + false insertion** + CER/WER + latency |
 | 8 | **성능 벤치마크** | §10 |
 | 9 | streaming (추후) | partial flicker, final commit 품질, 재decode 안정성 |
