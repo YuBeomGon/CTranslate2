@@ -125,6 +125,7 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 
 > ⚠️ **tokenizer compile은 P3가 아니라 P4** (§0.1). CT2엔 토크나이저가 없으므로 문자열→ids는 faster-whisper에서. P3는 그 결과(ids+bias)를 받아 **trie를 1회 build해 persistent 보관**.
 > **trie 보관 위치 결정(P3):** replica가 아니라 **WhisperWrapper(per-Whisper-object)** 에 `shared_ptr<const PhraseBiasTrie>` 보관 → generate마다 `WhisperOptions.compiled_phrase_bias_trie`로 **read-only 주입**(replica는 읽기만 → ReplicaPool race 없음, lock 불필요). 생성자 주입이라 immutable. **mutable setter는 보류**(replica race·불필요).
+> **`generate(phrase_biases=)` 3-way semantics(확정):** `None`=생성자 model-level trie 사용 · `[]`=이 호출만 disable(ablation) · `[...]`=per-call override(매 call build, 실험/테스트용 — 상용은 생성자만). pybind `optional<vector>`가 None/[] 구분.
 
 권장 실행 순서: ① CPU trie processor ✅ → ② CPU 테스트 ✅ → ③ GPU indexed_add ✅ → ④ CPU/GPU parity ✅ → ⑤ **CT2 Python binding(ids+bias)** → ⑥ **faster-whisper(tokenizer compile + A/B)**.
 

@@ -44,13 +44,18 @@ biases = [                                            # faster-whisper가 compil
         P(ids=[101, 200, 300], step_bias=0.25),       # "트랜스포머"
     ]),
 ]
-# 권장: 생성자 주입 (1회 compile → persistent trie)
+# 권장(상용): 생성자 주입 (1회 compile → persistent trie)
 model = ctranslate2.models.Whisper("model_dir", device="cpu", phrase_biases=biases)
-model.generate(features, prompts)                     # cached trie 재사용
 
-# per-call override (테스트/실험용)
-model.generate(features, prompts, phrase_biases=other_biases)   # None/[] = no-op
+# generate의 phrase_biases semantics (3-way, 확정):
+model.generate(features, prompts)                              # = None: model-level cached trie 사용
+model.generate(features, prompts, phrase_biases=None)         # 동일: model-level
+model.generate(features, prompts, phrase_biases=[])          # [] : 이 호출만 bias 끔 (disable)
+model.generate(features, prompts, phrase_biases=other_biases) # [...] : per-call override (실험/테스트용, 매 call build)
 ```
+
+> **None vs [] (확정):** `None`=생성자 model-level trie 사용 · `[]`=이 generate만 disable(ablation 스위치) · `[...]`=per-call override. pybind `optional<vector>`가 None(nullopt)/[](빈 vector)를 구분하므로 구현 가능.
+> **재사용/성능:** model-level trie 재사용은 **구조로 보장**(WhisperWrapper가 `_compiled_trie` 1회 build·보유, generate는 read-only 참조). 테스트는 "재빌드 안 함"을 직접 증명하지 않고 **output stability**만 확인. **per-call override(`[...]`)는 매 call trie build 허용 = 실험/테스트 전용**, 상용 경로는 생성자 `phrase_biases`만 쓴다.
 
 ---
 
@@ -429,13 +434,16 @@ Expected: FAIL.
                float sampling_temperature,
                const std::optional<std::vector<models::PhraseBias>>& phrase_biases) {
 ```
-본문에서 `options.suppress_blank = suppress_blank;` 다음에:
+본문에서 `options.suppress_blank = suppress_blank;` 다음에 (**3-way semantics**: None=model-level, []=disable, [...]=override):
 
 ```cpp
-        if (phrase_biases && !phrase_biases->empty())
-          options.phrase_biases = *phrase_biases;          // per-call override (C++가 build)
-        else
-          options.compiled_phrase_bias_trie = _compiled_trie;  // 생성자에서 만든 cached trie (없으면 nullptr=no-op)
+        if (phrase_biases) {                       // 명시적으로 전달됨 (빈 리스트 포함)
+          if (!phrase_biases->empty())
+            options.phrase_biases = *phrase_biases;  // [...] : per-call override (코어가 build)
+          // [] : 이 호출만 disable — 아무것도 주입 안 함 (compiled trie도 X)
+        } else {                                   // None : 생성자 model-level trie 사용 (없으면 nullptr=no-op)
+          options.compiled_phrase_bias_trie = _compiled_trie;
+        }
 ```
 
 - [ ] **Step 5: py::init + generate arg 등록** — `python/cpp/whisper.cc`의 Whisper `py::class_` 에서 `.def(py::init<...>())`의 템플릿 인자 끝에 `const std::optional<std::vector<models::PhraseBias>>&` 추가하고 `py::arg("files")=py::none(),` 다음에 `py::arg("phrase_biases")=py::none(),` 추가, 그리고 init docstring `Arguments:` 끝에:
@@ -451,9 +459,11 @@ Expected: FAIL.
 ```
 및 generate docstring `Arguments:` 끝에:
 ```
-                   phrase_biases: Optional per-call override list of PhraseBias. If given,
-                     overrides the model-level phrase_biases for this call. None/[] uses the
-                     model-level compiled trie (or no-op if none).
+                   phrase_biases: Per-call phrase bias control.
+                     None: use the model-level compiled trie set at construction (or no-op if none).
+                     []: disable phrase bias for this call only (ablation switch).
+                     [PhraseBias, ...]: override with these for this call (rebuilt per call;
+                     intended for experiments/tests — production uses the constructor argument).
 ```
 
 - [ ] **Step 6: 재빌드 + 통과**
@@ -551,9 +561,18 @@ def test_constructor_phrase_biases_persistent(tmp_dir):
     model = ctranslate2.models.Whisper(out, device="cpu", phrase_biases=_bias_on(g0, target))
     out1 = model.generate(features, prompts, beam_size=1)[0].sequences_ids[0]
     out2 = model.generate(features, prompts, beam_size=1)[0].sequences_ids[0]
-    assert out1[1] == target and out2[1] == target   # 두 번 모두 동일 효과 (cached trie 재사용)
+    assert out1[1] == target and out2[1] == target   # 두 번 모두 동일 효과 (cached trie 재사용 — output stability)
     assert out1 == out2
+    # None == model-level (biased)
+    none_out = model.generate(features, prompts, beam_size=1, phrase_biases=None)[0].sequences_ids[0]
+    assert none_out[1] == target
+    # [] == 이 호출만 disable → baseline (ablation 스위치)
+    disabled = model.generate(features, prompts, beam_size=1, phrase_biases=[])[0].sequences_ids[0]
+    assert disabled == base
+    assert disabled[1] == b1
 ```
+
+> 재사용 주의: 위 `out1 == out2`는 **output stability**만 확인한다. "trie가 generate마다 rebuild 안 됨"은 구조(WhisperWrapper `_compiled_trie` 1회 build·read-only 참조)로 보장되며, 직접 증명(counter/hook)은 과해서 안 한다.
 
 - [ ] **Step 2: 실행 (가능 환경)**
 
@@ -599,8 +618,9 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 **Spec 커버리지 (SSOT §5 P3 / §6 / 테스트 cat 6):**
 - load-time persistent trie = Task 1(shared trie) + Task 2(option) + Task 5(생성자 1회 build·보관·주입). generate rebuild 없음 = Task 2 compiled trie 우선 + Task 5 멤버 주입.
 - `PhraseBias*` 노출 = Task 4. 생성자 주입 = Task 5. per-call override = Task 5 generate.
-- empty no-op(§7-5) = Task 6 None/[] == baseline (compiled_trie nullptr → processor 안 생성).
-- 효과(cat 6 a/b/c/d) = Task 6 두 테스트(생성자 persistent + per-call + no-op + 재사용 동일성).
+- 3-way semantics(None=model-level / []=disable / [...]=override) = Task 5 Step 4 + Task 6 생성자 테스트(None→biased, []→baseline). 생성자 bias 없는 모델에선 None/[] 둘 다 no-op.
+- empty no-op(§7-5) = compiled_trie nullptr(생성자 미주입) 또는 [] disable → processor 안 생성.
+- 효과(cat 6 a/b/c/d) = Task 6 두 테스트(생성자 persistent 재사용 + per-call override + None/[] semantics).
 - 토크나이저 없음(§0.1) = Python API는 ids만. tokenizer correctness 없음(P4).
 - ReplicaPool race 없음 = trie는 `shared_ptr<const>` immutable, 생성자 고정, replica는 읽기만.
 
