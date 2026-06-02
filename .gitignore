@@ -2,6 +2,7 @@
 /.vs
 /build
 /build-cuda*
+/install-*
 
 CMake*.json
 .idea
