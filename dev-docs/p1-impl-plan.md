@@ -486,5 +486,5 @@ git commit -m "feat(whisper): inject PhraseBiasProcessor into generate (empty = 
 
 ## 다음 (P1 이후)
 - **P2** GPU `indexed_add` (CUDA, parity) — 별도 plan
-- **P3** Python binding + tokenizer compile — 별도 plan
+- **P3** CT2 Python 바인딩만 (ids+bias, **토크나이저 없음** — SSOT §0.1) — 별도 plan
 - **P4** faster-whisper 연동 — 별도 plan

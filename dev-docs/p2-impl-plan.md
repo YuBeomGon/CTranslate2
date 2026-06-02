@@ -370,5 +370,5 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 **최종 결과:** primitive parity(CPU+CUDA fp32) 2 PASS · processor parity(CPU fp32 + CUDA fp32/fp16/bf16) 4 PASS · 1차 게이트 17 PASS · 전체 회귀 CUDA 363 passed(known-fail Gemm 3개 외 신규 0) · portable `Common` 멀티-arch(sm_53~86 SASS + compute_86 PTX) 컴파일 OK. 커널 코드는 `static_cast<float>` 그대로 half/bf16 컴파일됨(fallback 불필요). 커밋 T2 `38a5b4c0` · T3 `424a7450`.
 
 ## 다음 (P2 이후)
-- **P3** Python binding + tokenizer compile (special 제거·leading-space 유지·space/no-space path) — 별도 plan
-- **P4** faster-whisper 연동 — 별도 plan
+- **P3** CT2 Python 바인딩만 (`PhraseBias*` 노출 + `generate(phrase_biases=...)`, **ids+bias in, 토크나이저 없음** — SSOT §0.1) — 별도 plan
+- **P4** faster-whisper 연동 — **tokenizer compile**(키워드→2 path, special 제거·leading-space·roundtrip) + 실제 A/B. faster-whisper repo — 별도 plan

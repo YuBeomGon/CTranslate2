@@ -3,7 +3,8 @@
 > **이 문서가 단일 진실 공급원(Single Source of Truth)입니다.** 결정·범위·금지사항·테스트·구현 참조가 전부 여기 있습니다.
 > 충돌/혼선 시 이 문서 기준. 배경 리서치는 `archive/deep-research-report.md`, 이전 분절 문서는 `archive/superseded-2026-06-02/`.
 >
-> 상태: 설계 확정, Phase 1 구현 전 · last updated 2026-06-02
+> 상태: **P1·P2 구현 완료** (CPU+GPU bias, parity). P3=CT2 Python 바인딩(ids+bias), P4=faster-whisper(tokenizer compile+A/B). · last updated 2026-06-02
+> ⚠️ 아키텍처 경계 §0.1 필독 — **CT2엔 토크나이저 없음**, tokenizer compile은 faster-whisper(P4).
 > 워크플로우: 개인 fork(`YuBeomGon/CTranslate2`) `feature/whisper-phrase-bias` 브랜치 → 개인 repo push.
 
 ---
@@ -17,15 +18,30 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 - **negative/suppress(block)는 보류.** positive에 집중.
 - **핵심 위험**: 잘못 설계하면 recall은 오르지만 없는 단어를 **insertion**한다. → 작은 bias + continuation-only + bounded path + init-time compile로 간다.
 
+### 0.1 아키텍처 경계 — ⚠️ CT2엔 토크나이저가 없다 (확정 2026-06-02, 코드 검증)
+
+외부 사용자는 **CT2에 직접 닿지 않고 faster-whisper를 통해** 접근한다. 토크나이저(text→BPE)는 **faster-whisper**가 들고 있고, CT2엔 **Vocabulary(token 문자열↔id 룩업, `vocabulary.h`)만** 있다 — 임의 텍스트를 BPE로 쪼개는 토크나이저는 **없다**. (converter의 `AutoTokenizer`는 변환(offline)할 때만 vocab 추출용.)
+
+```
+[사용자] → faster-whisper ──(token ids + step_bias)──► CT2 (LogitsProcessor)
+            ▲ 여기서 키워드를 자기 토크나이저로 compile      ▲ ids로만 매칭. 토크나이저 불필요
+              (encode, leading-space 2 path, special 제거,
+               roundtrip 검증, step_bias 분배)
+```
+
+- **faster-whisper 책임(P4):** 키워드 문자열 → token-id path(+step_bias) **compile**. 이게 §3 tokenizer correctness(제일 중요)의 실제 실행 위치.
+- **CT2 책임(P1~P3):** 컴파일된 `PhraseBias`(ids+step_bias)를 받아 reverse trie + soft bias 적용. **문자열을 받지 않는다.**
+- 따라서 P3는 **Python 바인딩만**(ids+bias를 generate에 내려보내는 통로). tokenizer compile은 P3가 아니라 **P4(faster-whisper)**. (이전 로드맵이 P3에 "tokenizer compile"을 둔 건 위치 오류 → 수정됨.)
+
 ---
 
 ## 1. 핵심 결정 (확정)
 
 | 항목 | 결정 |
 |------|------|
-| 입력 | 문자열 + `total_bias`. 예: `"트랜스포머": 0.5` |
+| 입력 | **(faster-whisper 레이어에서)** 문자열 + `total_bias`. 예: `"트랜스포머": 0.5`. **CT2 자체는 token ids + step_bias만 받음** (§0.1) |
 | **값 의미** | `total_bias`는 **logit(score) 가산** (퍼센트·배수 아님). `logits[token] += step`. +b는 상대 가중치 ×exp(b). **기본 0.5** (≈×1.65) |
-| 토큰화 | special token(SOT/lang/task/timestamp/start·end) 제거. **leading-space는 제거 금지** (§3) |
+| 토큰화 | **faster-whisper 책임(P4).** special token(SOT/lang/task/timestamp/start·end) 제거. **leading-space는 제거 금지** (§3) |
 | path | canonical **top-1**, 단 **leading-space 버전 + non-leading-space 버전 둘 다** (문장 중간 + segment 시작 커버). 두 path는 len이 다를 수 있어 각자 step 계산. alias·기타 다중 path 보류 |
 | **start_bias** | **없음 (0)**. 첫 토큰 안 올림 → insertion 방지. 음향 근거로 단어가 시작된 뒤 완성만 도움 |
 | 분배 | continuation step에만. `step_bias = total_bias / (len(ids) - 1)`. 예: `[A,B,C,D]`, total=0.5 → 각 +0.167 |
@@ -35,15 +51,17 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 | 1-token phrase | **skip + 경고 로그** (continuation 불가, start_bias=0이라 bias 0) |
 | 매칭 구조 | **reverse trie** (suffix 역방향 탐색). naive scan과 결과 동일, 성능용 |
 | primitive | soft bias는 **항상 `indexed_add` primitive를 dispatch 경유로 호출**. **P1에 CPU 구현, P2에 CUDA만 추가 → 인터페이스 불변**. `indexed_add`는 **unique index만** 받음(§7-7). dedupe/합산은 processor가 호출 전에 수행 |
-| compile 시점 | 모델 로드(도메인)당 **1회** init-time compile → trie 재사용. chunk/generate마다 재컴파일 **금지** |
+| compile 시점 | 키워드→ids compile은 **faster-whisper init 1회**(도메인 모델당), 결과를 CT2에 넘김. CT2는 그 entries로 trie build. chunk/generate마다 재토크나이즈 **금지** |
 | compiled bias 관리 | `model_id`/`tokenizer_hash`/`vocab_size`/`config_version`와 묶음 (model 바뀌면 재compile) |
 | empty option | `phrase_biases` 비면 **processor 생성 안 함** → 기존 decode와 결과/속도 동일 |
 | 배포 | 도메인/고객사별 모델 로딩 → vocab을 모델 init에 baking. private wheel/Docker, rollback = flag off |
 
 ## 2. 입력 → bias 계산 (worked example)
 
+> 아래 "컴파일" 단계는 **faster-whisper(P4)에서** 자기 토크나이저로 수행 → CT2엔 결과 `[ids], step_bias`만 전달 (§0.1).
+
 ```
-입력:  "트랜스포머", total_bias = 0.5
+입력:  "트랜스포머", total_bias = 0.5   [faster-whisper init]
 컴파일: " 트랜스포머"  (leading-space 포함) → tokenizer encode → [A, B, C, D]
         special token 제거 / decode([A,B,C,D]) == " 트랜스포머" 검증 / len >= 2
 
@@ -67,7 +85,9 @@ decode 중 동작 (start bias 없음):
 → clamp 발생 시 debug counter 증가 (운영 로그)
 ```
 
-## 3. tokenizer 규칙 (correctness — 제일 중요)
+## 3. tokenizer 규칙 (correctness — 제일 중요) · **실행 위치 = faster-whisper (P4)**
+
+> ⚠️ 이 규칙들은 **faster-whisper 레이어에서** 자기 토크나이저로 실행된다 (CT2엔 토크나이저 없음, §0.1). 단위 테스트도 faster-whisper에서 `encode`/`decode` 주입한 pure 함수로. CT2는 결과 ids만 받으므로 이 규칙을 검증할 수단이 없다.
 
 Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 첫 토큰에 붙는다.**
 `"트랜스포머"`를 그냥 encode하면 모델이 실제 문장 중간에서 내뱉는 `" 트랜스포머"`(앞 공백)의 token ids와 **달라져서 매칭이 영영 안 된다.**
@@ -80,8 +100,8 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 ## 4. MVP 정의
 
 - positive soft bias만
-- 문자열 + `total_bias` 입력 (logit 가산, 기본 0.5)
-- tokenizer special token 제거 + **leading-space 유지**
+- 문자열 + `total_bias` 입력 (logit 가산, 기본 0.5) — **faster-whisper 레이어 API**. CT2엔 ids+step_bias.
+- tokenizer special token 제거 + **leading-space 유지** — **faster-whisper(P4)**
 - canonical **top-1 path만**
 - **start_bias 없음**, continuation step 균등 분배
 - **reverse trie** + **init-time compile**
@@ -97,13 +117,15 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 
 | Phase | 내용 | 성공조건 |
 |-------|------|---------|
-| **P1** | CPU positive bias + **reverse trie** — leading-space correctness, start_bias 없음, total_bias 분배, canonical top-1 | C++ 단위 테스트 통과 |
-| **P2** | GPU sparse `indexed_add` — 기존 primitive 패턴 재사용 | **CPU/GPU parity** (fp32 타이트, fp16 tolerance), beam 1/5, batch>1 |
-| **P3** | Python binding + tokenizer compile — 문자열+total_bias, special 제거, leading-space 유지 | tokenizer correctness 테스트 + end-to-end |
-| **P4** | **faster-whisper** init-time 연동 — 도메인 모델 init 시 baking | A/B로 recall↑ 실측 |
+| **P1** ✅ | CPU positive bias + **reverse trie** — start_bias 없음, total_bias 분배, canonical top-1 (ids 입력) | C++ 단위 테스트 통과 |
+| **P2** ✅ | GPU sparse `indexed_add` — 기존 primitive 패턴 재사용 | **CPU/GPU parity** (fp32 타이트, fp16/bf16 tolerance), batch>1, portable 멀티-arch |
+| **P3** | **CT2 Python binding만** — `PhraseBias*`를 pybind 노출 + `generate(phrase_biases=...)` kwarg. **ids+step_bias in, 토크나이저 없음** | 바인딩 왕복(py list/dict→C++→동작) + empty no-op + whisper-tiny generate 통합 |
+| **P4** | **faster-whisper 연동 (tokenizer compile 포함)** — init 시 자기 토크나이저로 키워드→2 path compile(special 제거·leading-space·roundtrip 검증·step_bias) → `phrase_biases`로 CT2 generate 전달 | tokenizer correctness(pure 함수) + 실제 음성 A/B recall↑ |
 | 보류 | negative/suppress (block) | — |
 
-권장 실행 순서: ① CPU trie processor → ② CPU 테스트 통과 → ③ GPU indexed_add → ④ CPU/GPU parity → ⑤ Python binding → ⑥ faster-whisper.
+> ⚠️ **tokenizer compile은 P3가 아니라 P4** (§0.1). CT2엔 토크나이저가 없으므로 문자열→ids는 faster-whisper에서. P3는 그 결과를 받는 통로만.
+
+권장 실행 순서: ① CPU trie processor ✅ → ② CPU 테스트 ✅ → ③ GPU indexed_add ✅ → ④ CPU/GPU parity ✅ → ⑤ **CT2 Python binding(ids+bias)** → ⑥ **faster-whisper(tokenizer compile + A/B)**.
 
 ## 6. Code Map (수정 대상)
 
@@ -114,8 +136,10 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 | `src/decoding_utils.cc` | trie build + per-step suffix lookup + soft bias apply (CPU) | P1 |
 | `src/models/whisper.cc` | 옵션→entry 변환 + `logits_processors` 주입 (no-speech 후, empty면 skip) | P1/P3 |
 | `include/ctranslate2/primitives.h`, `src/cpu/primitives.cc`, `src/cuda/primitives.cu` | `indexed_add` (CPU 먼저, GPU 다음) | P1(CPU)/P2(GPU) |
-| `python/cpp/whisper.cc` | `phrase_biases` / `phrase_bias_config` kwarg | P3 |
+| `python/cpp/whisper.cc` | `PhraseBiasMode/Path/Bias` pybind `py::class_` 노출 + `generate(phrase_biases=...)` kwarg (suppress_tokens 패턴). **ids+bias만, 토크나이저 X** | P3 |
+| `python/tests/` | 바인딩 왕복 + empty no-op + generate 통합 테스트 | P3 |
 | `tests/decoding_test.cc` | acceptance tests | P1 |
+| **(faster-whisper repo, 별도)** | 키워드→2 path compile(pure 함수, encode/decode 주입) + init 연동 + A/B | P4 |
 
 **저수준 타입 (plain, `decoding_utils.h`, models 의존 금지):**
 ```cpp
@@ -139,14 +163,14 @@ struct PhraseBiasEntry {
 
 ## 8. 상용화 고려사항
 
-1. **special token 제거 보장** (§3) — 가장 중요. `decode(ids)==surface` + special 없음 + `len>=2`.
+1. **special token 제거 보장** (§3, **faster-whisper P4**) — 가장 중요. `decode(ids)==surface` + special 없음 + `len>=2`.
 2. **total bias 분배 고정** — 사용자 값은 전체 phrase bonus. token마다 +0.5(X), continuation에 분배(O).
 3. **짧은 phrase**: 1-token skip. 2-token `[A,B]`은 A가 흔하면 insertion 위험 → `min_prefix_len` 노브(필요시 len≥3만).
 4. **bias 상한**: clamp (total 0.1~1.5, step ≤ 0.5), error 아님.
 5. **insertion 평가 필수**: recall만 보면 안 됨. precision/false-insertion 같이.
 6. **streaming partial** (추후, 스트리밍 레이어 붙일 때): partial 약하게/off, final/2-pass에 정상 bias. MVP는 final/2-pass만.
-7. **tokenizer 버전 고정**: compiled bias를 `model_id/tokenizer_hash/vocab_size/config_version`와 묶음.
-8. **init-time compile**: 문자열→encode→검증→step_bias→trie build→decode 재사용. chunk마다 tokenizer 금지.
+7. **tokenizer 버전 고정** (faster-whisper P4): compiled bias를 `model_id/tokenizer_hash/vocab_size/config_version`와 묶음.
+8. **init-time compile** (faster-whisper P4): 문자열→encode→검증→step_bias. chunk마다 tokenizer 금지. (CT2는 받은 entries로 trie build.)
 9. **empty no-op** (§7-5): flag off 시 기존 CT2와 결과·속도 동일 → 회귀 테스트 필수.
 10. **로그/디버깅**: debug mode에서만 `phrase/token_ids/step_bias/matched_prefix_count/boosted_token_count`.
 11. **fallback**: `PHRASE_BIAS_ENABLED=false` 또는 config 없음 → 기존 decode 즉시 전환.
@@ -158,18 +182,18 @@ struct PhraseBiasEntry {
 
 | # | 테스트 | 핵심 |
 |---|--------|------|
-| 1 | **tokenizer correctness** (P3) | `" 트랜스포머"` encode에 special/SOT/lang/task/timestamp 없음, `decode(ids)==" 트랜스포머"`, `len>=2`. 앞 공백 유지 |
+| 1 | **tokenizer correctness** (**P4 faster-whisper**, pure 함수) | `" 트랜스포머"` encode에 special/SOT/lang/task/timestamp 없음, `decode(ids)==" 트랜스포머"`, `len>=2`. 앞 공백 유지. 2 path 각각. (CT2 아님 — 토크나이저가 거기 있음) |
 | 2 | **phrase bias 로직 — forced synthetic logits** (P1, 1차 안전망) | 손으로 만든 logits+sequences로: suffix `[A]`→B만 정확히 +step, `[A,B]`→C +step, `[X]`/`[B]`→no-op, suffix 없음→A boost 안 함, **overlap 합산**, **clamp** 동작. (모델 의존 X — 가장 결정적) |
 | 3 | **reverse trie** (P1) | `[A,B,C]`,`[A,B,D]`,`[X,Y]`: suffix `[A]`→{B}, `[A,B]`→**{C,D}(공유 prefix 둘 다)**, `[X]`→{Y} |
 | 4 | **empty no-op** (P1) | phrase 없음 → processor 생성 안 됨 → 기존 결과·속도 동일 (회귀) |
 | 5 | **CPU/GPU parity** (P2) | 동일 logits/sequences/trie: fp32 타이트, **fp16 tolerance(allclose)**, beam 1/5, batch>1, overlap 합산 일치 |
-| 6 | **Whisper generate 통합** (P1/P3) | whisper-tiny + dummy features로 `generate`가 phrase_biases 받아 decode result 변경 |
+| 6 | **Whisper generate 통합** (P3, Python 바인딩) | whisper-tiny + dummy features로 `generate(phrase_biases=...)`가 ids+bias 받아 decode result 변경. empty no-op |
 | 7 | **실제 음성 A/B** (P4) | vanilla vs bias-on: domain recall + **precision + false insertion** + CER/WER + latency |
 | 8 | **성능 벤치마크** | §10 |
 | 9 | streaming (추후) | partial flicker, final commit 품질, 재decode 안정성 |
 
-**테스트 우선순위**: 1 tokenizer → 2 trie → 3 CPU logits → 6 generate 통합 → 5 GPU parity → 7 실제 A/B → (9 streaming).
-핵심: tokenizer leading-space 틀리면 기능 자체가 안 먹고, GPU parity 틀리면 운영 못 넣고, A/B에서 insertion 안 보면 좋아진 것처럼 착각함.
+**테스트 우선순위**: (CT2) 2 trie ✅ → 3 CPU logits ✅ → 5 GPU parity ✅ → 6 generate 통합(P3) · (faster-whisper) 1 tokenizer(P4) → 7 실제 A/B(P4) → (9 streaming).
+핵심: tokenizer leading-space 틀리면(P4) 기능 자체가 안 먹고, GPU parity 틀리면(✅) 운영 못 넣고, A/B에서 insertion 안 보면 좋아진 것처럼 착각함.
 
 ## 10. Microbenchmark (성공 조건)
 
