@@ -26,7 +26,7 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 | 입력 | 문자열 + `total_bias`. 예: `"트랜스포머": 0.5` |
 | **값 의미** | `total_bias`는 **logit(score) 가산** (퍼센트·배수 아님). `logits[token] += step`. +b는 상대 가중치 ×exp(b). **기본 0.5** (≈×1.65) |
 | 토큰화 | special token(SOT/lang/task/timestamp/start·end) 제거. **leading-space는 제거 금지** (§3) |
-| path | canonical **top-1 path만** (alias·다중 path 보류) |
+| path | canonical **top-1**, 단 **leading-space 버전 + non-leading-space 버전 둘 다** (문장 중간 + segment 시작 커버). 두 path는 len이 다를 수 있어 각자 step 계산. alias·기타 다중 path 보류 |
 | **start_bias** | **없음 (0)**. 첫 토큰 안 올림 → insertion 방지. 음향 근거로 단어가 시작된 뒤 완성만 도움 |
 | 분배 | continuation step에만. `step_bias = total_bias / (len(ids) - 1)`. 예: `[A,B,C,D]`, total=0.5 → 각 +0.167 |
 | 동작 | suffix `[A]`→B에 +step, `[A,B]`→C에 +step, `[A,B,C]`→D에 +step (조건부 continuation) |
@@ -34,6 +34,7 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 | 상한 | config validation에서 **error 아닌 clamp** (운영 중 안 죽게). `total_bias` 0.1~1.5, `step_bias` ≤ 0.5. **clamp는 overlap 합산 후 per-token delta에 적용** |
 | 1-token phrase | **skip + 경고 로그** (continuation 불가, start_bias=0이라 bias 0) |
 | 매칭 구조 | **reverse trie** (suffix 역방향 탐색). naive scan과 결과 동일, 성능용 |
+| primitive | soft bias는 **항상 `indexed_add` primitive를 dispatch 경유로 호출**. **P1에 CPU 구현, P2에 CUDA만 추가 → 인터페이스 불변**. `indexed_add`는 **unique index만** 받음(§7-7). dedupe/합산은 processor가 호출 전에 수행 |
 | compile 시점 | 모델 로드(도메인)당 **1회** init-time compile → trie 재사용. chunk/generate마다 재컴파일 **금지** |
 | compiled bias 관리 | `model_id`/`tokenizer_hash`/`vocab_size`/`config_version`와 묶음 (model 바뀌면 재compile) |
 | empty option | `phrase_biases` 비면 **processor 생성 안 함** → 기존 decode와 결과/속도 동일 |
@@ -56,6 +57,16 @@ decode 중 동작 (start bias 없음):
   (아무 suffix 없음 / 첫 토큰) → A는 boost 안 함
 ```
 
+**clamp/합산 순서 (구현 고정 — 에이전트 혼란 방지):**
+```
+1. total_bias clamp            (0.1 ~ 1.5)
+2. step_bias = total_bias / (len(ids) - 1)
+3. step_bias clamp             (≤ 0.5)
+4. 같은 (row, token) delta 합산  (overlap)
+5. 최종 per-token delta clamp   (≤ max_token_delta, 기본 1.0)
+→ clamp 발생 시 debug counter 증가 (운영 로그)
+```
+
 ## 3. tokenizer 규칙 (correctness — 제일 중요)
 
 Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 첫 토큰에 붙는다.**
@@ -63,7 +74,8 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 
 - canonical path = **"문장 중간에 나올 때 형태" = leading-space 버전**으로 인코딩.
 - 제거 대상 = **special prefix/suffix(SOT/lang/task/timestamp/start·end)**. **앞 공백 마커는 절대 제거 금지.**
-- 검증: `decode(ids) == " 트랜스포머"`, special token 없음, `len(ids) >= 2`.
+- **MVP는 두 path를 모두 컴파일**: ① leading-space `" 트랜스포머"`(문장 중간) ② non-leading-space `"트랜스포머"`(segment 시작). 각 path는 별도 검증·step 계산.
+- 검증: `decode(ids) == 해당 surface`(공백 포함/미포함 각각), special token 없음, `len(ids) >= 2`. (둘 중 한 path만 유효하면 그것만 사용.)
 
 ## 4. MVP 정의
 
@@ -105,6 +117,16 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 | `python/cpp/whisper.cc` | `phrase_biases` / `phrase_bias_config` kwarg | P3 |
 | `tests/decoding_test.cc` | acceptance tests | P1 |
 
+**저수준 타입 (plain, `decoding_utils.h`, models 의존 금지):**
+```cpp
+struct PhraseBiasEntry {
+  std::vector<size_t> ids;     // token path (leading-space 또는 non-leading-space)
+  float step_bias;             // 미리 계산됨 = total_bias/(len-1), clamp 적용
+  uint16_t min_prefix_len = 1; // 이 길이만큼 매칭돼야 boost (insertion 안전 노브)
+};
+```
+`models::PhraseBias`(whisper.h) → `PhraseBiasEntry` 변환은 `whisper.cc`. processor 흐름: trie lookup → `(row,token,delta)` 수집 → **dedupe/합산/clamp** → unique `(flat_index, delta)` → `indexed_add(logits, deltas, indices, n)`.
+
 ## 7. 🚫 금지사항 (위반 시 리뷰 반려)
 
 1. token **전역(global) boost 금지** — BPE 토큰은 여러 단어 공유. 반드시 **조건부 continuation**(suffix 일치 시에만).
@@ -113,6 +135,7 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 4. **매 generate마다 trie 재생성 금지** — init-time 1회 compile, 이후 lookup만.
 5. `phrase_biases` 비면 **processor 생성 금지** (empty = no-op).
 6. **새 CUDA 스타일 만들기 금지** — GPU는 §11 exemplar(`indexed_fill` 등) 패턴을 먼저 조사 후 재사용.
+7. **`indexed_add`에 중복 index 넘기기 금지** — CUDA에서 같은 index에 여러 thread `+=` = race. dedupe/합산은 **processor(CPU)에서 primitive 호출 전**에 끝내고, `indexed_add`는 **unique index만** 받는다 (CPU/GPU 공통 계약).
 
 ## 8. 상용화 고려사항
 
@@ -136,7 +159,7 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 | # | 테스트 | 핵심 |
 |---|--------|------|
 | 1 | **tokenizer correctness** (P3) | `" 트랜스포머"` encode에 special/SOT/lang/task/timestamp 없음, `decode(ids)==" 트랜스포머"`, `len>=2`. 앞 공백 유지 |
-| 2 | **phrase bias 로직** (P1) | `[A,B,C]`, total/step: suffix `[A]`→B +step, `[A,B]`→C +step, `[X]`/`[B]`→no-op, suffix 없음→A boost 안 함 |
+| 2 | **phrase bias 로직 — forced synthetic logits** (P1, 1차 안전망) | 손으로 만든 logits+sequences로: suffix `[A]`→B만 정확히 +step, `[A,B]`→C +step, `[X]`/`[B]`→no-op, suffix 없음→A boost 안 함, **overlap 합산**, **clamp** 동작. (모델 의존 X — 가장 결정적) |
 | 3 | **reverse trie** (P1) | `[A,B,C]`,`[A,B,D]`,`[X,Y]`: suffix `[A]`→{B}, `[A,B]`→**{C,D}(공유 prefix 둘 다)**, `[X]`→{Y} |
 | 4 | **empty no-op** (P1) | phrase 없음 → processor 생성 안 됨 → 기존 결과·속도 동일 (회귀) |
 | 5 | **CPU/GPU parity** (P2) | 동일 logits/sequences/trie: fp32 타이트, **fp16 tolerance(allclose)**, beam 1/5, batch>1, overlap 합산 일치 |
