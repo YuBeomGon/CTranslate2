@@ -200,7 +200,7 @@ Expected: 링크 실패 — `undefined reference to ... primitives<Device::CUDA>
 
 - [ ] **Step 6: CUDA 빌드 + 통과 확인 (+ portable arch 컴파일 게이트)**
 
-Run: `cmake --build build-cuda -j"$(nproc)" --target ctranslate2_test && ./build-cuda/tests/ctranslate2_test --gtest_filter='*PrimitiveTest.IndexedAdd' tests/data`
+Run: `cmake --build build-cuda -j"$(nproc)" --target ctranslate2_test && ./build-cuda/tests/ctranslate2_test --gtest_filter='*PrimitiveTest.IndexedAdd/*' tests/data`
 Expected: 2 PASS — `CPU/PrimitiveTest.IndexedAdd`, `CUDA/PrimitiveTest.IndexedAdd`.
 
 그리고 **우리 커널이 모든 common arch에서 컴파일되는지**(portability) 재확인:
@@ -209,7 +209,7 @@ Expected: `Built target ctranslate2` (여러 `-gencode` flag로 에러 없이). 
 
 - [ ] **Step 7: CPU 빌드 회귀 확인** (CPU 빌드에선 device 파라미터가 CPU만 → 1 PASS, 깨지지 않았는지)
 
-Run: `cd /data/MyProject/stt/CTranslate2/build && make -j"$(nproc)" ctranslate2_test && ./tests/ctranslate2_test --gtest_filter='*PrimitiveTest.IndexedAdd' /tmp`
+Run: `cd /data/MyProject/stt/CTranslate2/build && make -j"$(nproc)" ctranslate2_test && ./tests/ctranslate2_test --gtest_filter='*PrimitiveTest.IndexedAdd/*' /tmp`
 Expected: 1 PASS — `CPU/PrimitiveTest.IndexedAdd`. (P1 plain 테스트 제거로 인한 누락 없음.)
 
 - [ ] **Step 8: 커밋**
@@ -359,6 +359,15 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - **block(32) 유지** — penalize와 동일, 128/256으로 바꾸지 말 것(코드베이스 일관성, perf 무관).
 - CPU parity param은 fp32만(DisableTokens dtype 제약, 코드 확인됨). CUDA는 fp16/bf16 포함.
 - **arch hardcode/atomic/cooperative groups/버전 의존 API 금지** (GPU portability requirement 섹션).
+
+## 실행 노트 (실제와 차이 — 2026-06-02 실행, ✅ P2 완료)
+> 플랜 본문은 "의도" 기록으로 보존. 실제 실행에서 아래가 달랐다(재독 시 참고). 재사용 교훈은 SSOT §13/§11에 반영됨.
+
+1. **Task 1 baseline 빌드 순서** — 플랜은 "커널 추가 전 baseline CUDA 빌드 성공"을 가정했으나, **P1 processor가 이미 `DEVICE_AND_TYPE_DISPATCH`로 `primitives<Device::CUDA>::indexed_add`를 참조**해 우리 커널 없이는 **link 실패**. 이 link 에러 자체가 Task 2 Step 2의 기대 실패와 동일 → Task 2 커널을 먼저 구현 후 sanity(PenalizePreviousTokens) 확인. (교훈: SSOT §13 "레이어링 사실".)
+2. **파라미터화 테스트 필터** — `--gtest_filter='*PrimitiveTest.IndexedAdd'`는 0 매칭. `TEST_P`는 param suffix `/0`이 붙어 **`/*` 필요**: `'*PrimitiveTest.IndexedAdd/*'`. (본문 필터 인라인 수정함.)
+3. **`--gtest_list_tests`도 positional data-dir 인자 필수** (없으면 `missing data directory` throw).
+
+**최종 결과:** primitive parity(CPU+CUDA fp32) 2 PASS · processor parity(CPU fp32 + CUDA fp32/fp16/bf16) 4 PASS · 1차 게이트 17 PASS · 전체 회귀 CUDA 363 passed(known-fail Gemm 3개 외 신규 0) · portable `Common` 멀티-arch(sm_53~86 SASS + compute_86 PTX) 컴파일 OK. 커널 코드는 `static_cast<float>` 그대로 half/bf16 컴파일됨(fallback 불필요). 커밋 T2 `38a5b4c0` · T3 `424a7450`.
 
 ## 다음 (P2 이후)
 - **P3** Python binding + tokenizer compile (special 제거·leading-space 유지·space/no-space path) — 별도 plan

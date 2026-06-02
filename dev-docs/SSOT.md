@@ -195,14 +195,14 @@ struct PhraseBiasEntry {
 - generate 주입 지점 → `src/models/whisper.cc:325-340` (empty면 skip)
 - processor 순서 (`make_logits_processors`, apply_first=false는 맨 뒤) → `src/decoding.cc:1091`
 
-**`indexed_add` primitive (= `indexed_fill`을 `=`→`+=`, 스칼라→delta 배열):**
-- 선언 `include/ctranslate2/primitives.h:21` · CPU `src/cpu/primitives.cc:60` · CUDA `src/cuda/primitives.cu:63`
-- CUDA 커널/launch 패턴 → `penalize_previous_tokens_kernel` `src/cuda/primitives.cu:284`(launch :302/311)
-- **명시적 인스턴스화 매크로** (없으면 link 실패) → CUDA `:762`, CPU `:1168`
-- 제안 시그니처: `static void indexed_add(T* x, const T* deltas, const int32_t* indices, dim_t num_indices);`
-- dispatch 매크로: `DEVICE_AND_TYPE_DISPATCH` `src/dispatch.h:6`
+**`indexed_add` primitive (✅ P1 CPU `975e26f8` / P2 CUDA `38a5b4c0` 구현 완료):**
+- 시그니처: `static void indexed_add(T* x, const T* deltas, const int32_t* indices, dim_t num_indices);` (선언 `primitives.h`, `indexed_fill` 옆)
+- **CPU** `src/cpu/primitives.cc` — `indexed_fill` 복사 후 `x[i] = T(float(x[i]) + float(deltas[i]))`. ⚠️ raw `+=` 금지: `DECLARE_IMPL`이 `bfloat16_t`/`float16_t`까지 인스턴스화하는데 half엔 `operator+=` 없음 → **float 경유 필수**.
+- **CUDA** `src/cuda/primitives.cu` — `indexed_add_kernel`(=`penalize_previous_tokens_kernel` 패턴, half는 float 경유, **atomic 미사용**: unique index라 race 없음) + launch(`dim3 block(32)`, `device_cast`/`get_cuda_stream`).
+- **명시적 인스턴스화 매크로** (없으면 link 실패) → `DECLARE_IMPL` 안 `indexed_fill` 옆에 추가 (CPU/CUDA 각각).
+- dispatch 매크로: `DEVICE_AND_TYPE_DISPATCH` `src/dispatch.h:6`. processor는 호출 전 `std::map`으로 dedupe/합산 → **unique index만 전달**(§7-7).
 
-**한 줄 요약(GPU):** `indexed_fill`(set) 복사 → `indexed_add`(+=), `penalize_previous_tokens` launch 패턴 차용. 그 이상 새 CUDA 금지.
+**한 줄 요약(GPU):** `indexed_fill`(set) 복사 → `indexed_add`(+=), `penalize_previous_tokens` launch 패턴 차용, half는 float 경유, atomic 금지. 그 이상 새 CUDA 금지.
 
 ## 12. 디자인 검증 (실제 코드 대조)
 
@@ -216,9 +216,14 @@ struct PhraseBiasEntry {
 
 ## 13. 빌드/테스트 환경 (검증됨)
 
-- CPU 빌드(셀프컨테인드): `cmake -DBUILD_TESTS=ON -DBUILD_CLI=OFF -DWITH_MKL=OFF -DWITH_RUY=ON -DWITH_CUDA=OFF -DOPENMP_RUNTIME=NONE -DCMAKE_BUILD_TYPE=Release ..` → `make -j ctranslate2_test`
-- 테스트: `./tests/ctranslate2_test --gtest_filter='PhraseBiasTest.*' /tmp` (positional data-dir 인자 필요)
-- **baseline known-fail (무시):** `CPU/OpDeviceFPTest.Gemm/GemmBias/GemmResidual /float32` (Ruy 수치 아티팩트, 우리와 무관)
+- CPU 빌드(셀프컨테인드): `cmake -DBUILD_TESTS=ON -DBUILD_CLI=OFF -DWITH_MKL=OFF -DWITH_RUY=ON -DWITH_CUDA=OFF -DOPENMP_RUNTIME=NONE -DCMAKE_BUILD_TYPE=Release ..` → `make -j ctranslate2_test` (디렉터리 `build/`)
+- **CUDA 빌드(P2~, 검증됨 2026-06-02):** 위 CPU flag에서 `-DWITH_CUDA=ON -DWITH_CUDNN=OFF`로 변경. **두 종류 분리**:
+  - `build-cuda/` — `-DCUDA_ARCH_LIST=Auto`(기본). **로컬 GPU 단일 arch(여기선 sm_89)만 감지 → 로컬 smoke/실행 전용.** 빠름.
+  - `build-cuda-portable/` — `-DCUDA_ARCH_LIST=Common`. **멀티-arch fat binary(sm_53/60/61/70/75/80/86 + compute_86 PTX) → release portability 게이트.** 실행은 로컬 GPU 한정이라 **컴파일 성공이 게이트**(`--target ctranslate2`). 느림(8 arch).
+  - ⚠️ portability는 소스가 아니라 **빌드 설정** 문제다. arch-중립 소스 + `Common` 빌드가 둘 다 있어야 함. `Auto`만으론 그 GPU 전용 바이너리.
+- 테스트: `./tests/ctranslate2_test --gtest_filter='PhraseBiasTest.*' /tmp` (**positional data-dir 인자 필수** — `--gtest_list_tests`도 인자 없으면 throw). **파라미터화 테스트(`TEST_P`)는 필터에 `/*` 붙여야 매칭**: 예 `--gtest_filter='*PrimitiveTest.IndexedAdd/*'` (suffix `/0` 때문).
+- **baseline known-fail (무시):** `CPU/OpDeviceFPTest.{Gemm,GemmBias,GemmResidual}/float32` (Ruy 수치 아티팩트, 우리와 무관). CUDA 빌드 시 `CUDA/OpDeviceFPTest.Conv1DGroupNoBiasQuantized/*`도 skip(=`WITH_CUDNN=OFF`, 무관). 게이트 판정 = **이 외 신규 실패 0**.
+- **레이어링 사실(P2에서 확인, P3/P4 주의):** `DEVICE_AND_TYPE_DISPATCH`를 쓰는 LogitsProcessor는 **모든 device의 primitive 심볼을 강제**한다. 즉 CPU-only primitive 상태에서 CUDA 빌드하면 processor가 `primitives<Device::CUDA>::...`를 참조해 **link 실패**. → primitive의 CPU/CUDA 구현은 **같은 PR/Phase에서 짝으로**(P1 CPU만 머지된 채 CUDA 빌드하면 깨짐).
 
 ## 14. 참고
 
