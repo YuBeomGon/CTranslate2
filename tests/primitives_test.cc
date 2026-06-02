@@ -51,6 +51,15 @@ TEST_P(PrimitiveTest, PenalizePreviousTokens) {
   expect_storage_eq(scores, expected);
 }
 
+TEST(IndexedAddTest, CPU) {
+  std::vector<float> x = {0, 1, 2, 3, 4};
+  std::vector<float> deltas = {0.5f, 0.25f};
+  std::vector<int32_t> indices = {1, 3};
+  primitives<Device::CPU>::indexed_add(x.data(), deltas.data(), indices.data(), 2);
+  std::vector<float> expected = {0, 1.5f, 2, 3.25f, 4};
+  EXPECT_EQ(x, expected);
+}
+
 INSTANTIATE_TEST_SUITE_P(CPU, PrimitiveTest, ::testing::Values(Device::CPU));
 #ifdef CT2_WITH_CUDA
 INSTANTIATE_TEST_SUITE_P(CUDA, PrimitiveTest, ::testing::Values(Device::CUDA));
