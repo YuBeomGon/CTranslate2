@@ -27,13 +27,14 @@
 - [x] P3-T6  whisper-tiny 통합 (생성자 persistent + per-call + empty no-op)  `15b0aadb`
 - [x] **P3 완료 게이트**: C++ PhraseBiasTest 10 PASS · Python phrase bias 6 PASS · Whisper smoke 1 passed/8 skipped · 전체 C++ 회귀 196 passed/1 skipped, known-fail Gemm 3개 외 신규 실패 0
 
-## Phase 4 — faster-whisper 연동 (tokenizer compile 포함)  ⬜ 대기 · plan: [`p4-impl-plan.md`](p4-impl-plan.md)
-> 외부 사용자 진입점. 토크나이저가 여기 있음 → 키워드 compile 여기서.
-- [ ] 키워드→2 path compile **pure 함수** (encode/decode 주입, special 제거, leading-space, roundtrip, step_bias)
-- [ ] tokenizer correctness 테스트 (`decode(ids)==" 트랜스포머"`, 2 path)
-- [ ] init 시 compile → `phrase_biases`로 CT2 generate 전달
-- [ ] 실제 음성 A/B (recall + precision + insertion + CER/WER + latency)
+## Phase 4 — faster-whisper 연동 (tokenizer compile 포함)  ✅ 완료 · plan: [`p4-impl-plan.md`](p4-impl-plan.md) · 보고 [`p4-completion-report.md`](p4-completion-report.md)
+> 외부 사용자 진입점. 토크나이저가 여기 있음 → 키워드 compile 여기서. 구현은 faster-whisper repo(`feature/phrase-bias`).
 - [x] 구현 플랜 작성 — [`p4-impl-plan.md`](p4-impl-plan.md)
+- [x] 키워드→2 path compile **pure 함수** (`faster_whisper/phrase_bias.py`, special 제거·leading-space·roundtrip·uniform/ramp step_bias)  `b9076d3`
+- [x] tokenizer correctness 테스트 (FakeTokenizer 단위 + 실제 whisper tiny 2 path roundtrip)  `b9076d3`/`1b94fb4`
+- [x] init 시 compile → `Whisper(phrase_biases=...)` 생성자 전달 (`transcribe.py`, 충돌검사·토크나이저 선로딩)  `1a810c0`
+- [x] 실제 음성 A/B 러너 (`benchmark/phrase_bias_ab.py`, recall/insertion/latency) + hotwords 스모크  `7ade840`
+- [x] **P4 완료 게이트**: faster-whisper 집중 16 PASS(phrase_bias 11 + tokenizer 3 + transcribe 2) · CT2 P3 호환 6 PASS · A/B 스모크 exit 0
 
 ---
 범례: ⬜ 대기 · ⏳ 진행 중 · ✅ 완료
