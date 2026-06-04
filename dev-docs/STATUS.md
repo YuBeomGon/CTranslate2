@@ -17,15 +17,15 @@
 - [x] P2-T3  `PhraseBiasProcessor` CPU/GPU parity (CPU fp32 + CUDA fp32/fp16/bf16, batch>1, overlap)  `424a7450`
 - [x] **P2 완료 게이트**: 1차 게이트 17 PASS · 전체 회귀 CUDA 363 passed (known-fail Gemm 3개 외 신규 0) · portable Common 멀티-arch(sm_53~86+PTX) 컴파일 OK
 
-## Phase 3 — CT2 Python 바인딩 + **load-time persistent trie** (ids+bias, 토크나이저 없음)  ⬜ 대기 · plan: [`p3-impl-plan.md`](p3-impl-plan.md)
+## Phase 3 — CT2 Python 바인딩 + **load-time persistent trie** (ids+bias, 토크나이저 없음)  ✅ 완료 · plan: [`p3-impl-plan.md`](p3-impl-plan.md)
 > ⚠️ tokenizer compile은 여기 아님 → P4 (SSOT §0.1). trie는 WhisperWrapper에 1회 build/보관, generate 재사용(rebuild 없음).
-- [ ] P3-T1  C++ `build_phrase_bias_trie` + `PhraseBiasProcessor(shared_ptr<const trie>)` (shared trie)
-- [ ] P3-T2  C++ `WhisperOptions.compiled_phrase_bias_trie` + generate 사용(rebuild 없음)
-- [ ] P3-T3  Python ext 빌드 환경 (install-cpu + pip -e)
-- [ ] P3-T4  `PhraseBiasPath/PhraseBias` pybind 노출 + re-export
-- [ ] P3-T5  `Whisper(phrase_biases=...)` 생성자 주입(persistent) + `generate(phrase_biases=...)` override
-- [ ] P3-T6  whisper-tiny 통합 (생성자 persistent + per-call + empty no-op)
-- [ ] **P3 완료 게이트**: C++ PhraseBiasTest + Python 단위 4 PASS + 기존 회귀 신규 실패 0
+- [x] P3-T1  C++ `build_phrase_bias_trie` + `PhraseBiasProcessor(shared_ptr<const trie>)` (shared trie)  `92a7cb89`
+- [x] P3-T2  C++ `WhisperOptions.compiled_phrase_bias_trie` + generate 사용(rebuild 없음)  `a4d0f651`
+- [x] P3-T3  Python ext 빌드 환경 (install-cpu + pip -e, ignore rules)  `aa023f71` / `ab4134eb`
+- [x] P3-T4  `PhraseBiasPath/PhraseBias` pybind 노출 + re-export  `cab9ba65`
+- [x] P3-T5  `Whisper(phrase_biases=...)` 생성자 주입(persistent) + `generate(phrase_biases=...)` override  `e91699c0`
+- [x] P3-T6  whisper-tiny 통합 (생성자 persistent + per-call + empty no-op)  `15b0aadb`
+- [x] **P3 완료 게이트**: C++ PhraseBiasTest 10 PASS · Python phrase bias 6 PASS · Whisper smoke 1 passed/8 skipped · 전체 C++ 회귀 196 passed/1 skipped, known-fail Gemm 3개 외 신규 실패 0
 
 ## Phase 4 — faster-whisper 연동 (tokenizer compile 포함)  ⬜ 대기
 > 외부 사용자 진입점. 토크나이저가 여기 있음 → 키워드 compile 여기서.
