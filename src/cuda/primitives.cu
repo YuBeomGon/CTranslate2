@@ -76,8 +76,9 @@ namespace ctranslate2 {
          i < num_indices;
          i += blockDim.x * gridDim.x) {
       const cuda::index_t idx = indices[i];
-      // unique index 계약(SSOT §7-7)이라 동일 idx 동시 쓰기 없음 → race 없음 → atomic 불필요.
-      // half/bf16는 penalize_previous_tokens_kernel과 동일하게 float 경유.
+      // Indices are unique by contract, so no two threads write the same idx.
+      // No race means no atomic is needed. half/bf16 follow penalize_previous_tokens_kernel
+      // and go through float.
       const float updated = static_cast<float>(x[idx]) + static_cast<float>(deltas[i]);
       x[idx] = updated;
     }
@@ -89,7 +90,7 @@ namespace ctranslate2 {
                                              const int32_t* indices, dim_t num_indices) {
     if (num_indices == 0)
       return;
-    dim3 block(32);  // penalize_previous_tokens launch와 동일. <100개 scatter라 perf 무관 — 일관성 위해 32.
+    dim3 block(32);  // Keep the same launch shape as penalize_previous_tokens.
     dim3 grid((num_indices + block.x - 1) / block.x);
     indexed_add_kernel<<<grid, block, 0, cuda::get_cuda_stream()>>>(
       cuda::device_cast(x),

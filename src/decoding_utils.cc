@@ -1,5 +1,6 @@
 #include "ctranslate2/decoding_utils.h"
 
+#include <algorithm>
 #include <set>
 #include <utility>
 
@@ -71,11 +72,11 @@ namespace ctranslate2 {
   void PhraseBiasTrie::add(const PhraseBiasEntry& entry) {
     const auto& ids = entry.ids;
     if (ids.size() < 2)
-      return;  // 1-token phrase: continuation 불가 -> skip
-    // rule j (1..len-1): suffix [ids[0..j-1]] 일치 시 ids[j] boost.
+      return;  // 1-token phrase has no continuation -> skip.
+    // Rule j (1..len-1): when suffix [ids[0..j-1]] matches, adjust ids[j].
     for (size_t j = 1; j < ids.size(); ++j) {
       if (j < entry.min_prefix_len)
-        continue;  // 매칭 길이 j 가 min_prefix_len 미만이면 제외
+        continue;  // Skip matches shorter than min_prefix_len.
       Node* node = &_root;
       // reverse-prefix: ids[j-1], ids[j-2], ..., ids[0]
       for (size_t k = j; k-- > 0; )
@@ -93,7 +94,7 @@ namespace ctranslate2 {
         break;
       node = &it->second;
       for (const auto& action : node->actions)
-        out[action.first] += action.second;  // 합산 (overlap)
+        out[action.first] += action.second;  // Sum overlapping rules.
     }
   }
 
@@ -102,7 +103,7 @@ namespace ctranslate2 {
   build_phrase_bias_trie(const std::vector<PhraseBiasEntry>& entries) {
     auto trie = std::make_shared<PhraseBiasTrie>();
     for (const auto& entry : entries)
-      trie->add(entry);  // 1-token/min_prefix_len 필터는 trie.add 내부
+      trie->add(entry);  // trie.add handles 1-token and min_prefix_len filtering.
     return trie;
   }
 
@@ -126,7 +127,7 @@ namespace ctranslate2 {
                                   const std::vector<dim_t>&,
                                   const std::vector<std::vector<size_t>>*) {
     if (!sequences)
-      return;  // step 0: 생성된 토큰 없음
+      return;  // step 0: no generated tokens yet.
 
     const dim_t batch_size = logits.dim(0);
     const dim_t vocab_size = logits.dim(-1);
@@ -137,9 +138,9 @@ namespace ctranslate2 {
     for (dim_t b = 0; b < batch_size; ++b) {
       const int32_t* row = sequences.index<int32_t>({b, 0});
       std::map<size_t, float> boost;
-      _trie->lookup(row, length, boost);  // 합산
+      _trie->lookup(row, length, boost);  // Sum overlaps.
       for (const auto& kv : boost) {
-        const float delta = std::min(kv.second, _max_token_delta);  // 최종 clamp
+        const float delta = std::clamp(kv.second, -_max_token_delta, _max_token_delta);  // Final clamp.
         flat_indices.push_back(static_cast<int32_t>(b * vocab_size + kv.first));
         deltas.push_back(delta);
       }

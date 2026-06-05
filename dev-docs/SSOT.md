@@ -1,9 +1,9 @@
-# CTranslate2 Whisper — Positive Phrase Bias (SSOT)
+# CTranslate2 Whisper — Signed Phrase Bias (SSOT)
 
 > **이 문서가 단일 진실 공급원(Single Source of Truth)입니다.** 결정·범위·금지사항·테스트·구현 참조가 전부 여기 있습니다.
 > 충돌/혼선 시 이 문서 기준. 배경 리서치는 `archive/deep-research-report.md`, 이전 분절 문서는 `archive/superseded-2026-06-02/`.
 >
-> 상태: **P1·P2 구현 완료** (CPU+GPU bias, parity). P3=CT2 Python 바인딩(ids+bias), P4=faster-whisper(tokenizer compile+A/B). · last updated 2026-06-02
+> 상태: **P1·P2 구현 완료** (CPU+GPU bias, parity). P3=CT2 Python 바인딩(ids+bias), P4=faster-whisper(tokenizer compile+A/B), P5=signed negative bias. · last updated 2026-06-05
 > ⚠️ 아키텍처 경계 §0.1 필독 — **CT2엔 토크나이저 없음**, tokenizer compile은 faster-whisper(P4).
 > 워크플로우: 개인 fork(`YuBeomGon/CTranslate2`) `feature/whisper-phrase-bias` 브랜치 → 개인 repo push.
 
@@ -11,12 +11,13 @@
 
 ## 0. 개요
 
-CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 추가한다.
-문장 **아무 위치**에서 도메인 phrase가 나오려 할 때, **다음 token logit에 positive bias**를 줘서 도메인 용어 recall을 올린다.
+CTranslate2 Whisper 디코더에 **도메인 용어 signed phrase bias**를 추가한다.
+문장 **아무 위치**에서 domain phrase가 나오려 할 때, **다음 token logit에 양수 또는 음수 bias**를 더한다.
+양수 bias는 도메인 용어 recall을 올리고, 음수 bias는 자주 생기는 오인식 후보를 soft suppress한다.
 
 - 기존 번역용 `prefix_bias_beta`/`target_prefix`/`suppress`와 **다른 새 구현**. 외부 hack 아님 — CT2 내부 `LogitsProcessor` 파이프라인에 자연스럽게 주입.
-- **negative/suppress(block)는 보류.** positive에 집중.
-- **핵심 위험**: 잘못 설계하면 recall은 오르지만 없는 단어를 **insertion**한다. → 작은 bias + continuation-only + bounded path + init-time compile로 간다.
+- **hard suppress(block)는 보류.** 현재 음수 bias는 logit에서 값을 빼는 soft bias다.
+- **핵심 위험**: 잘못 설계하면 양수 bias는 없는 단어를 **insertion**하고, 음수 bias는 정답 후보를 과도하게 누를 수 있다. → 작은 bias + continuation-only + bounded path + init-time compile로 간다.
 
 ### 0.1 아키텍처 경계 — ⚠️ CT2엔 토크나이저가 없다 (확정 2026-06-02, 코드 검증)
 
@@ -39,15 +40,15 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 
 | 항목 | 결정 |
 |------|------|
-| 입력 | **(faster-whisper 레이어에서)** 문자열 + `total_bias`. 예: `"트랜스포머": 0.5`. **CT2 자체는 token ids + step_bias만 받음** (§0.1) |
-| **값 의미** | `total_bias`는 **logit(score) 가산** (퍼센트·배수 아님). `logits[token] += step`. +b는 상대 가중치 ×exp(b). **기본 0.5** (≈×1.65) |
+| 입력 | **(faster-whisper 레이어에서)** 문자열 + signed `total_bias`. 예: `"트랜스포머": 5.0`, `"트랜스포마": -3.0`. **CT2 자체는 token ids + step_bias만 받음** (§0.1) |
+| **값 의미** | `total_bias`는 **logit(score) 가산** (퍼센트·배수 아님). `logits[token] += step`. `bias > 0`은 상대 가중치 ×exp(b)로 boost, `bias < 0`은 ×exp(b)로 soft suppress. **기본 total 5.0**, term clamp -5.0~5.0, step 절댓값 상한 2.0 |
 | 토큰화 | **faster-whisper 책임(P4).** special token(SOT/lang/task/timestamp/start·end) 제거. **leading-space는 제거 금지** (§3) |
-| path | canonical **top-1**, 단 **leading-space 버전 + non-leading-space 버전 둘 다** (문장 중간 + segment 시작 커버). 두 path는 len이 다를 수 있어 각자 step 계산. alias·기타 다중 path 보류 |
+| path | canonical **top-1**, 단 **leading-space 버전 + non-leading-space 버전 둘 다** (문장 중간 + segment 시작 커버). 두 path는 len이 다를 수 있어 각자 step 계산. alias는 faster-whisper config에서 추가 surface로 지원 |
 | **start_bias** | **없음 (0)**. 첫 토큰 안 올림 → insertion 방지. 음향 근거로 단어가 시작된 뒤 완성만 도움 |
-| 분배 | continuation step에만. `step_bias = total_bias / (len(ids) - 1)`. 예: `[A,B,C,D]`, total=0.5 → 각 +0.167 |
-| 동작 | suffix `[A]`→B에 +step, `[A,B]`→C에 +step, `[A,B,C]`→D에 +step (조건부 continuation) |
-| overlap | 같은 step에서 여러 phrase가 같은 `(row,token)`에 → **합산**. 예 +0.2,+0.3 → +0.5 |
-| 상한 | config validation에서 **error 아닌 clamp** (운영 중 안 죽게). `total_bias` 0.1~1.5, `step_bias` ≤ 0.5. **clamp는 overlap 합산 후 per-token delta에 적용** |
+| 분배 | continuation step에만. `step_bias = total_bias / (len(ids) - 1)`, 이후 `[-max_step_bias,+max_step_bias]`로 clamp. 예: `[A,B,C,D]`, total=5.0 → 각 +1.667, total=-5.0 → 각 -1.667 |
+| 동작 | suffix `[A]`→B에 `+/-step`, `[A,B]`→C에 `+/-step`, `[A,B,C]`→D에 `+/-step` (조건부 continuation) |
+| overlap | 같은 step에서 여러 phrase가 같은 `(row,token)`에 → **합산**. 예 +0.2,+0.3 → +0.5, -0.8,-0.8 → -1.6 |
+| 상한 | config validation에서 **error 아닌 clamp** (운영 중 안 죽게). `total_bias` -5.0~5.0, `step_bias` -2.0~2.0. **CT2 최종 clamp는 overlap 합산 후 per-token delta에 `[-max_token_delta,+max_token_delta]`로 적용** |
 | 1-token phrase | **skip + 경고 로그** (continuation 불가, start_bias=0이라 bias 0) |
 | 매칭 구조 | **reverse trie** (suffix 역방향 탐색). naive scan과 결과 동일, 성능용 |
 | primitive | soft bias는 **항상 `indexed_add` primitive를 dispatch 경유로 호출**. **P1에 CPU 구현, P2에 CUDA만 추가 → 인터페이스 불변**. `indexed_add`는 **unique index만** 받음(§7-7). dedupe/합산은 processor가 호출 전에 수행 |
@@ -61,29 +62,31 @@ CTranslate2 Whisper 디코더에 **도메인 용어 positive phrase bias**를 �
 > 아래 "컴파일" 단계는 **faster-whisper(P4)에서** 자기 토크나이저로 수행 → CT2엔 결과 `[ids], step_bias`만 전달 (§0.1).
 
 ```
-입력:  "트랜스포머", total_bias = 0.5   [faster-whisper init]
+입력:  "트랜스포머", total_bias = 5.0   [faster-whisper init]
 컴파일: " 트랜스포머"  (leading-space 포함) → tokenizer encode → [A, B, C, D]
         special token 제거 / decode([A,B,C,D]) == " 트랜스포머" 검증 / len >= 2
 
-step_bias = total_bias / (len - 1) = 0.5 / 3 ≈ 0.167
+step_bias = clamp(total_bias / (len - 1), -max_step_bias, +max_step_bias)
+          = clamp(5.0 / 3, -2.0, +2.0) ≈ +1.667
 
 decode 중 동작 (start bias 없음):
-  ... A        → B에 +0.167
-  ... A B      → C에 +0.167
-  ... A B C    → D에 +0.167
+  ... A        → B에 +1.667
+  ... A B      → C에 +1.667
+  ... A B C    → D에 +1.667
   ... (suffix 불일치) → no-op
   (아무 suffix 없음 / 첫 토큰) → A는 boost 안 함
 ```
 
 **clamp/합산 순서 (구현 고정 — 에이전트 혼란 방지):**
 ```
-1. total_bias clamp            (0.1 ~ 1.5)
+1. total_bias clamp            (-5.0 ~ 5.0)
 2. step_bias = total_bias / (len(ids) - 1)
-3. step_bias clamp             (≤ 0.5)
+3. step_bias clamp             (-2.0 ~ 2.0)
 4. 같은 (row, token) delta 합산  (overlap)
-5. 최종 per-token delta clamp   (≤ max_token_delta, 기본 1.0)
-→ clamp 발생 시 debug counter 증가 (운영 로그)
+5. 최종 per-token delta clamp   (-max_token_delta ~ +max_token_delta, 기본 ±2.0)
 ```
+
+> clamp debug counter는 아직 미구현이다. 운영 관찰성이 필요하면 별도 low-priority 작업으로 추가한다.
 
 ## 3. tokenizer 규칙 (correctness — 제일 중요) · **실행 위치 = faster-whisper (P4)**
 
@@ -99,15 +102,16 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 
 ## 4. MVP 정의
 
-- positive soft bias만
-- 문자열 + `total_bias` 입력 (logit 가산, 기본 0.5) — **faster-whisper 레이어 API**. CT2엔 ids+step_bias.
+- signed soft bias만 (`bias > 0` boost, `bias < 0` soft suppress)
+- hard block/suppress 없음
+- 문자열 + `total_bias` 입력 (logit 가산, 기본 5.0, 허용 범위 -5.0~5.0) — **faster-whisper 레이어 API**. CT2엔 ids+step_bias.
 - tokenizer special token 제거 + **leading-space 유지** — **faster-whisper(P4)**
 - canonical **top-1 path만**
 - **start_bias 없음**, continuation step 균등 분배
 - **reverse trie** + **init-time compile**
 - empty option no-op
 - 1-token phrase skip
-- bias clamp (합산 후)
+- signed bias clamp (합산 후)
 
 → 상용화 관점에서 과하지 않고 효과를 빠르게 검증 가능.
 
@@ -117,11 +121,12 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 
 | Phase | 내용 | 성공조건 |
 |-------|------|---------|
-| **P1** ✅ | CPU positive bias + **reverse trie** — start_bias 없음, total_bias 분배, canonical top-1 (ids 입력) | C++ 단위 테스트 통과 |
+| **P1** ✅ | CPU continuation bias + **reverse trie** — start_bias 없음, total_bias 분배, canonical top-1 (ids 입력) | C++ 단위 테스트 통과 |
 | **P2** ✅ | GPU sparse `indexed_add` — 기존 primitive 패턴 재사용 | **CPU/GPU parity** (fp32 타이트, fp16/bf16 tolerance), batch>1, portable 멀티-arch |
-| **P3** | **CT2 Python binding + load-time persistent trie** — `PhraseBias*` pybind 노출, `Whisper(..., phrase_biases=[...])` **생성자 주입**(compile된 trie를 WhisperWrapper에 1회 build/보관), generate가 cached trie 참조(rebuild 없음). `generate(phrase_biases=...)` per-call override도 지원. **ids+step_bias in, 토크나이저 없음** | 바인딩 왕복 + empty no-op + whisper-tiny 효과(생성자/per-call 둘 다) |
-| **P4** | **faster-whisper 연동 (tokenizer compile 포함)** — init 시 자기 토크나이저로 키워드→2 path compile(special 제거·leading-space·roundtrip 검증·step_bias) → `Whisper(phrase_biases=...)` 생성자로 전달 | tokenizer correctness(pure 함수) + 실제 음성 A/B recall↑ |
-| 보류 | negative/suppress (block) | — |
+| **P3** ✅ | **CT2 Python binding + load-time persistent trie** — `PhraseBias*` pybind 노출, `Whisper(..., phrase_biases=[...])` **생성자 주입**(compile된 trie를 WhisperWrapper에 1회 build/보관), generate가 cached trie 참조(rebuild 없음). `generate(phrase_biases=...)` per-call override도 지원. **ids+step_bias in, 토크나이저 없음** | 바인딩 왕복 + empty no-op + whisper-tiny 효과(생성자/per-call 둘 다) |
+| **P4** ✅ | **faster-whisper 연동 (tokenizer compile 포함)** — init 시 자기 토크나이저로 키워드→2 path compile(special 제거·leading-space·roundtrip 검증·step_bias) → `Whisper(phrase_biases=...)` 생성자로 전달 | tokenizer correctness(pure 함수) + 실제 음성 A/B recall↑ |
+| **P5** ✅ | **signed negative bias 확장** — 같은 `terms[].bias`에 음수 허용, faster-whisper는 signed clamp/스케줄, CT2는 overlap 합산 후 양방향 clamp | 비모델 단위 테스트 + CT2 negative clamp 테스트 |
+| 보류 | hard suppress (block) | — |
 
 > ⚠️ **tokenizer compile은 P3가 아니라 P4** (§0.1). CT2엔 토크나이저가 없으므로 문자열→ids는 faster-whisper에서. P3는 그 결과(ids+bias)를 받아 **trie를 1회 build해 persistent 보관**.
 > **trie 보관 위치 결정(P3):** replica가 아니라 **WhisperWrapper(per-Whisper-object)** 에 `shared_ptr<const PhraseBiasTrie>` 보관 → generate마다 `WhisperOptions.compiled_phrase_bias_trie`로 **read-only 주입**(replica는 읽기만 → ReplicaPool race 없음, lock 불필요). 생성자 주입이라 immutable. **mutable setter는 보류**(replica race·불필요).
@@ -150,8 +155,8 @@ Whisper는 byte-level BPE(tiktoken)라 **문장 중간 단어는 앞 공백이 �
 ```cpp
 struct PhraseBiasEntry {
   std::vector<size_t> ids;     // token path (leading-space 또는 non-leading-space)
-  float step_bias;             // 미리 계산됨 = total_bias/(len-1), clamp 적용
-  uint16_t min_prefix_len = 1; // 이 길이만큼 매칭돼야 boost (insertion 안전 노브)
+  float step_bias;             // 미리 계산된 signed step bias, clamp 적용
+  uint16_t min_prefix_len = 1; // 이 길이만큼 매칭돼야 bias 적용
 };
 ```
 `models::PhraseBias`(whisper.h) → `PhraseBiasEntry` 변환은 `whisper.cc`. processor 흐름: trie lookup → `(row,token,delta)` 수집 → **dedupe/합산/clamp** → unique `(flat_index, delta)` → `indexed_add(logits, deltas, indices, n)`.
@@ -169,9 +174,9 @@ struct PhraseBiasEntry {
 ## 8. 상용화 고려사항
 
 1. **special token 제거 보장** (§3, **faster-whisper P4**) — 가장 중요. `decode(ids)==surface` + special 없음 + `len>=2`.
-2. **total bias 분배 고정** — 사용자 값은 전체 phrase bonus. token마다 +0.5(X), continuation에 분배(O).
+2. **total bias 분배 고정** — 사용자 값은 전체 phrase bonus. token마다 전체 bias를 그대로 더하기(X), continuation에 분배(O).
 3. **짧은 phrase**: 1-token skip. 2-token `[A,B]`은 A가 흔하면 insertion 위험 → `min_prefix_len` 노브(필요시 len≥3만).
-4. **bias 상한**: clamp (total 0.1~1.5, step ≤ 0.5), error 아님.
+4. **bias 상한**: clamp (total -5.0~5.0, step -2.0~2.0), error 아님.
 5. **insertion 평가 필수**: recall만 보면 안 됨. precision/false-insertion 같이.
 6. **streaming partial** (추후, 스트리밍 레이어 붙일 때): partial 약하게/off, final/2-pass에 정상 bias. MVP는 final/2-pass만.
 7. **tokenizer 버전 고정** (faster-whisper P4): compiled bias를 `model_id/tokenizer_hash/vocab_size/config_version`와 묶음.

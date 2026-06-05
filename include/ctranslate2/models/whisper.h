@@ -11,19 +11,12 @@
 namespace ctranslate2 {
   namespace models {
 
-    enum class PhraseBiasMode : int8_t {
-      Soft = 0,   // logits += bias
-      Block = 1   // disable next token
-    };
-
     // One tokenization path of a surface form. The bias is applied to the next
     // token when the current sequence suffix matches a prefix of `ids`.
     struct PhraseBiasPath {
       std::vector<size_t> ids;
-      float start_bias = 0.f;        // bias for the first token of the path
-      float step_bias = 0.f;         // bias for continuation tokens
+      float step_bias = 0.f;         // Bias for continuation tokens.
       uint16_t min_prefix_len = 1;
-      PhraseBiasMode mode = PhraseBiasMode::Soft;
     };
 
     // A surface form (and its aliases) compiled to one or more token paths.

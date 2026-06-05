@@ -11,11 +11,20 @@ import test_utils
 
 import ctranslate2
 
+_DEFAULT_PHRASE_BIAS_MAX_TOKEN_DELTA = 2.0
+
 
 def test_phrase_bias_path_defaults():
     p = ctranslate2.models.PhraseBiasPath(ids=[10, 20, 30], step_bias=0.25)
     assert list(p.ids) == [10, 20, 30]
     assert abs(p.step_bias - 0.25) < 1e-6
+    assert p.min_prefix_len == 1
+
+
+def test_phrase_bias_path_accepts_negative_step_bias():
+    p = ctranslate2.models.PhraseBiasPath(ids=[10, 20, 30], step_bias=-0.25)
+    assert list(p.ids) == [10, 20, 30]
+    assert abs(p.step_bias + 0.25) < 1e-6
     assert p.min_prefix_len == 1
 
 
@@ -101,7 +110,7 @@ def _select_flippable_target(result, special_token_begin):
                 continue
             if not np.isfinite(step_logits[token]):
                 continue
-            if base_logit - step_logits[token] < 0.95:
+            if base_logit - step_logits[token] < _DEFAULT_PHRASE_BIAS_MAX_TOKEN_DELTA - 0.05:
                 return base[token_index - 2:token_index], token_index, base_token, token
 
     pytest.skip("No generated step close enough for a clamped phrase bias to flip")

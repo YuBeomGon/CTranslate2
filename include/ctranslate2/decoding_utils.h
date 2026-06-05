@@ -136,14 +136,14 @@ namespace ctranslate2 {
     const dim_t _ngram_size;
   };
 
-  // Low-level, model-agnostic phrase bias path. step_bias is precomputed (= total_bias/(len-1), clamped).
+  // Low-level, model-agnostic phrase bias path. step_bias is precomputed and signed.
   struct PhraseBiasEntry {
     std::vector<size_t> ids;
     float step_bias = 0.f;
     uint16_t min_prefix_len = 1;
   };
 
-  // Reverse-prefix trie: maps a reversed suffix to the next token(s) to boost.
+  // Reverse-prefix trie: maps a reversed suffix to the next token(s) to adjust.
   class PhraseBiasTrie {
   public:
     void add(const PhraseBiasEntry& entry);
@@ -162,15 +162,15 @@ namespace ctranslate2 {
   std::shared_ptr<const PhraseBiasTrie>
   build_phrase_bias_trie(const std::vector<PhraseBiasEntry>& entries);
 
-  // Positive continuation phrase bias. apply_first()=false so it runs after no-speech.
+  // Signed continuation phrase bias. apply_first()=false so it runs after no-speech.
   class PhraseBiasProcessor : public LogitsProcessor {
   public:
     // Convenience: build a fresh trie from entries.
     explicit PhraseBiasProcessor(const std::vector<PhraseBiasEntry>& entries,
-                                 float max_token_delta = 1.0f);
+                                 float max_token_delta = 2.0f);
     // Share a pre-built trie (no rebuild) — used by the load-time cached path.
     explicit PhraseBiasProcessor(std::shared_ptr<const PhraseBiasTrie> trie,
-                                 float max_token_delta = 1.0f);
+                                 float max_token_delta = 2.0f);
 
     bool apply_first() const override { return false; }
 

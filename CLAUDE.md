@@ -11,9 +11,10 @@ STT(음성 인식) 용도로 커스텀 수정을 진행합니다.
 
 ## 이 포크의 목적
 
-CTranslate2의 **Whisper 디코더에 도메인 용어 positive phrase bias**를 추가한다.
-문장 아무 위치에서 도메인 phrase가 나오려 할 때 **다음 token logit에 positive bias**를 줘서 recall↑.
-(negative/suppress는 보류.) 기존 `LogitsProcessor` 파이프라인에 `PhraseBiasProcessor`를 additive 주입.
+CTranslate2의 **Whisper 디코더에 도메인 용어 signed phrase bias**를 추가한다.
+문장 아무 위치에서 도메인 phrase가 나오려 할 때 **다음 token logit에 양수/음수 bias**를 더해
+도메인 용어 recall을 올리거나 오인식 후보를 soft suppress한다.
+hard block/suppress는 보류. 기존 `LogitsProcessor` 파이프라인에 `PhraseBiasProcessor`를 additive 주입.
 
 > **모든 결정·범위·금지사항·테스트·구현 참조는 [`dev-docs/SSOT.md`](dev-docs/SSOT.md) 하나에 통합되어 있다. 작업 전 SSOT를 먼저, 끝까지 읽어라.**
 
@@ -81,5 +82,6 @@ src/ops/my_op_gpu.cu              # CUDA 구현
 ## 작업 규칙
 
 - `docs/` (공식 Sphinx)는 건드리지 않는다. 내 문서는 전부 `dev-docs/`.
+- 코드 동작, API, 기본값, 설정 스키마가 바뀌면 반드시 `dev-docs/SSOT.md`와 관련 `dev-docs/` 문서를 같은 변경에서 갱신한다. 코드와 문서가 불일치하면 작업 미완료로 본다.
 - 수정 시 `dev-docs/changes.md`에 변경 내역을 남긴다.
 - 변경이 성능에 부정적 영향을 주지 않는지 확인한다 (`--log_throughput`).

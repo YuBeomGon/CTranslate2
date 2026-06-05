@@ -36,5 +36,15 @@
 - [x] 실제 음성 A/B 러너 (`benchmark/phrase_bias_ab.py`, recall/insertion/latency) + hotwords 스모크  `7ade840`
 - [x] **P4 완료 게이트**: faster-whisper 집중 16 PASS(phrase_bias 11 + tokenizer 3 + transcribe 2) · CT2 P3 호환 6 PASS · A/B 스모크 exit 0
 
+## Phase 5 — signed negative phrase bias  ✅ 완료 · plan: [`p5-negative-bias-impl-plan.md`](p5-negative-bias-impl-plan.md)
+> 같은 `terms[].bias` 필드에서 음수를 허용한다. 양수는 boost, 음수는 soft suppress. hard block/start bias는 범위 밖.
+- [x] CT2 signed clamp 구현: overlap 합산 후 `[-max_token_delta,+max_token_delta]`
+- [x] CT2 negative clamp synthetic logits 테스트 추가
+- [x] CT2 Python binding negative `step_bias` 왕복 테스트 추가
+- [x] faster-whisper signed config parser/scheduler 구현
+- [x] faster-whisper negative uniform/ramp 단위 테스트 추가
+- [x] SSOT/README/dev-docs/example config 동기화
+- [x] **P5 완료 게이트**: CT2 C++ PhraseBiasTest 13 PASS · CT2 Python binding 비모델 5 PASS · faster-whisper 비모델 phrase bias 23 PASS/1 deselected · ruff/py_compile/diff-check 통과
+
 ---
 범례: ⬜ 대기 · ⏳ 진행 중 · ✅ 완료

@@ -118,10 +118,10 @@ Expected: 컴파일 실패 — `build_phrase_bias_trie` 미선언 / `PhraseBiasP
   public:
     // Convenience: build a fresh trie from entries.
     explicit PhraseBiasProcessor(const std::vector<PhraseBiasEntry>& entries,
-                                 float max_token_delta = 1.0f);
+                                 float max_token_delta = 2.0f);
     // Share a pre-built trie (no rebuild) — used by the load-time cached path.
     explicit PhraseBiasProcessor(std::shared_ptr<const PhraseBiasTrie> trie,
-                                 float max_token_delta = 1.0f);
+                                 float max_token_delta = 2.0f);
 
     bool apply_first() const override { return false; }
 

@@ -61,8 +61,8 @@ LD_LIBRARY_PATH=/data/MyProject/stt/CTranslate2/install-cpu/lib:/data/MyProject/
 
 3. T6 whisper-tiny 통합 테스트의 target 선택 방식을 조정했다.
    - 원래 계획은 baseline의 초반 토큰을 기준으로 target을 강제하는 단순 형태였다.
-   - 실제 whisper-tiny logits에서는 두 번째 token margin이 `PhraseBiasProcessor`의 최종 clamp `+1.0`보다 커서 테스트가 skip될 수 있었다.
-   - 그래서 baseline `return_logits_vocab` 전체 step을 훑고, `+1.0` clamp로 실제 argmax를 뒤집을 수 있는 step을 자동 선택하도록 바꿨다.
+   - 실제 whisper-tiny logits에서는 두 번째 token margin이 `PhraseBiasProcessor`의 최종 clamp보다 커서 테스트가 skip될 수 있었다.
+   - 그래서 baseline `return_logits_vocab` 전체 step을 훑고, 현재 기본 `+2.0` clamp로 실제 argmax를 뒤집을 수 있는 step을 자동 선택하도록 바꿨다.
    - 구현 계약인 최종 delta clamp는 그대로 유지했고, 테스트만 특정 step에 덜 의존하게 조정했다.
 
 4. T6 audio fixture 경로 확인 방식을 조정했다.
@@ -77,4 +77,3 @@ LD_LIBRARY_PATH=/data/MyProject/stt/CTranslate2/install-cpu/lib:/data/MyProject/
 
 P3는 CT2 Python binding까지만 다룬다. 키워드 문자열을 Whisper tokenizer로
 token ids + step bias로 compile하는 일은 P4 faster-whisper 범위다.
-

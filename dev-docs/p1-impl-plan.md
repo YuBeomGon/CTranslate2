@@ -237,7 +237,7 @@ git commit -m "feat(decoding): add PhraseBiasEntry and reverse trie"
 
 ## Task 3: `PhraseBiasProcessor` (CPU apply, forced synthetic logits)
 
-trie lookup → 각 row의 `(token,delta)` 합산 → 최종 per-token clamp(`max_token_delta`, 기본 1.0) → unique `(flat_index, delta)` → `indexed_add`. `apply_first()=false`. step 0 `sequences` null 가드.
+trie lookup → 각 row의 `(token,delta)` 합산 → 최종 per-token clamp(`max_token_delta`, 기본 2.0) → unique `(flat_index, delta)` → `indexed_add`. `apply_first()=false`. step 0 `sequences` null 가드.
 
 **Files:**
 - Modify: `include/ctranslate2/decoding_utils.h`
@@ -301,7 +301,7 @@ TEST(PhraseBiasTest, ProcessorNoMatchAndNullAreNoOp) {
   class PhraseBiasProcessor : public LogitsProcessor {
   public:
     explicit PhraseBiasProcessor(const std::vector<PhraseBiasEntry>& entries,
-                                 float max_token_delta = 1.0f);
+                                 float max_token_delta = 2.0f);
 
     bool apply_first() const override { return false; }
 
