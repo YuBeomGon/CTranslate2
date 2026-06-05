@@ -140,7 +140,7 @@ namespace ctranslate2 {
       std::map<size_t, float> boost;
       _trie->lookup(row, length, boost);  // Sum overlaps.
       for (const auto& kv : boost) {
-        const float delta = std::clamp(kv.second, -_max_token_delta, _max_token_delta);  // Final clamp.
+        const float delta = std::min(kv.second, _max_token_delta);  // Final clamp (positive-only).
         flat_indices.push_back(static_cast<int32_t>(b * vocab_size + kv.first));
         deltas.push_back(delta);
       }
