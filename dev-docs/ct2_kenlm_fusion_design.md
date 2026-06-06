@@ -77,11 +77,12 @@ Internal decoding layer는 generic scorer interface를 받되, translator/genera
 
 - Whisper beam search
 - `beam_size > 1`
-- `sampling_topk == 1`
-- `sampling_temperature == 1`
+- deterministic sampler path
 - `return_alternatives == false`
 
 Unsupported 조합은 조용히 baseline으로 떨어지지 않고 validation error를 낸다. 실험 지표 오염을 막기 위해 1차 구현에서는 명시 실패가 기본이다.
+
+CT2에서 deterministic sampler path는 현재 `sampling_topk == 1` 또는 `sampling_temperature == 0`일 때 `BestSampler`가 선택되는 경로다. LM fusion은 random sampling path와 함께 쓰지 않는다.
 
 ### 3.4 Output ID Policy
 
@@ -149,15 +150,20 @@ Hard prefix는 candidate selection 이후 `update_sample_with_prefix()`가 token
 
 1차 정책:
 
-- hard prefix가 활성화된 forced step에서는 LM fusion scoring을 우회한다.
+- `use_hard_prefix`이고 live batch 중 하나라도 `step <= prefix_ids[batch_offset[i]].size()`이면 해당 decoding step 전체에서 LM fusion scoring을 우회한다.
 - 기존 CT2 sampler/prefix update 경로로 최종 token을 확정한다.
-- 최종 token 기준으로 LM state만 advance 또는 copy한다.
+- `update_sample_with_prefix()` 이후 최종 `topk_ids`와 `gather_indices` 기준으로 candidate LM state만 advance 또는 copy한다.
+- batch별 prefix length가 달라도 1차 구현은 step 전체 우회를 사용한다. per-batch fusion/baseline 혼합은 후속 최적화로 둔다.
 
 ### 3.8 Prompt Replay Policy
 
 Whisper prompt 중 decoder state에 이미 replay된 prefix text가 있으면 LM state도 같은 text history로 seed되어야 한다.
 
-1차 구현에서는 `WhisperReplica::generate()`가 `start_tokens`와 분리한 prompt prefix를 기준으로 LM initial history를 전달한다.
+1차 구현에서는 제한된 prompt replay만 지원한다.
+
+- `WhisperReplica::generate()`가 `start_tokens`와 분리한 prompt prefix를 기준으로 LM initial history를 전달한다.
+- LM initial history에는 `original_id < _eot_id`인 text token만 넣는다.
+- Whisper control token, task token, language token, timestamp token은 initial history에서 제외한다.
 
 이 범위가 불명확한 previous-text prompt 운영 경로는 별도 parity test로 고정하기 전까지 open risk로 둔다.
 
@@ -254,10 +260,17 @@ public:
                           size_t in_index,
                           LmStateBatch& out_states,
                           size_t out_index) const = 0;
+  virtual void gather(const LmStateBatch& src,
+                      const std::vector<int32_t>& indices,
+                      LmStateBatch& dst) const = 0;
+  virtual void keep_batches(const LmStateBatch& src,
+                            const std::vector<int32_t>& kept_batch_ids,
+                            dim_t beam_size,
+                            LmStateBatch& dst) const = 0;
 };
 ```
 
-State gather/prune helper는 scorer interface나 local helper 중 하나로 구현한다. 핵심 계약은 CT2 `active_beams`와 `non_finished_index`를 그대로 따르는 것이다.
+State는 opaque type이므로 gather/prune은 scorer interface가 담당한다. 핵심 계약은 CT2 `active_beams`와 `non_finished_index`를 그대로 따르는 것이다.
 
 ## 6. Validation
 
@@ -268,8 +281,7 @@ alpha > 0
 asr_topk > 0
 scorer != nullptr
 beam_size > 1
-sampling_topk == 1
-sampling_temperature == 1
+deterministic sampler path
 return_alternatives == false
 asr_topk <= vocabulary_size
 ```
@@ -288,11 +300,12 @@ Unsupported mode는 silent fallback하지 않는다.
 - beam reorder 후 다음 step LM state alignment가 유지된다.
 - finished batch prune 후 LM state order가 유지된다.
 - hard prefix forced step에서 최종 token과 LM state가 일치한다.
+- valid candidate가 `num_candidates`보다 부족하면 silent fallback하지 않고 명확히 실패한다.
 - `WITH_KENLM=OFF`에서 fusion 요청은 명확히 실패한다.
 
 ## 8. Open Questions
 
 - 1차 구현에서 path-keyed KenLM cache를 포함할지, 단순 load로 시작할지 결정이 필요하다.
-- previous-text prompt replay 범위를 실제 faster-whisper 운영 경로와 맞출지 확인이 필요하다.
+- previous-text prompt replay 범위를 실제 faster-whisper 운영 경로와 맞출지 확인이 필요하다. 1차 구현은 forwarded prompt prefix의 text token replay까지만 지원한다.
 - timestamp-enabled decoding을 1차부터 허용할지, skip token 정책만으로 충분한지 test가 필요하다.
 - KenLM을 system install, `KENLM_ROOT`, vendoring 중 어떤 방식으로 빌드에 포함할지 결정이 필요하다.

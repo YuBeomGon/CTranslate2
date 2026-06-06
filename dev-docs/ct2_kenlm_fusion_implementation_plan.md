@@ -139,16 +139,13 @@ alpha > 0
 asr_topk > 0
 scorer != nullptr
 beam_size > 1
-sampling_topk == 1
-sampling_temperature == 1
+deterministic sampler path
 return_alternatives == false
 ```
 
 Vocabulary-size validation must happen inside `BeamSearch::search()` because `decoder.output_size()` is available there.
 
-Risk:
-
-- `sampling_temperature == 0` currently selects `BestSampler`; fusion should still reject any non-1 temperature unless design changes.
+Current CT2 sampler factory selects `BestSampler` when `sampling_topk == 1` or `sampling_temperature == 0.0`. Fusion validation should reject only the random sampling path, not an otherwise deterministic `BestSampler` path.
 
 ## 6. Step 4: Candidate Selection Helper
 
@@ -180,7 +177,7 @@ Change:
 - The helper returns:
 
 ```text
-topk_ids        CPU [cur_batch_size, num_candidates], flat beam*vocab ids
+topk_ids        CPU [cur_batch_size, num_candidates], output token ids
 topk_scores     CPU [cur_batch_size, num_candidates], fused cumulative score
 gather_indices  CPU [cur_batch_size * num_candidates]
 candidate_states matching [cur_batch_size * num_candidates]
@@ -197,11 +194,12 @@ Algorithm:
    - otherwise call scorer and add `alpha * lm_score_ln`
 4. For each batch, partial sort `beam_size * asr_topk` candidates.
 5. Emit top `num_candidates` in the same shape expected by existing CT2 code.
+6. `topk_ids` must contain output token ids, not flattened ids. `gather_indices` carries the selected beam origins.
 
 Risk:
 
 - GPU/CPU dtype conversion: `topk_scores.scalar_at<float>()` is already used later, but helper should avoid unnecessary type assumptions where possible.
-- If `asr_topk < num_candidates / beam_size`, candidate pool may be too small. Validation should require `asr_topk > 0`; helper should handle fewer valid candidates after padding skip.
+- If valid candidates after padding skip are fewer than `num_candidates`, do not expand ASR top-k internally and do not silently fallback. The helper should fail with a clear runtime error. Dummy `-inf` candidates may be used only as an internal sentinel and must not become active beams.
 
 ## 7. Step 5: `expand_after_first_step`
 
@@ -254,12 +252,13 @@ Whisper prompt handling currently:
 Implementation options:
 
 1. Add `DecodingOptions::lm_initial_histories` as original token ids per batch.
-2. In `WhisperReplica::generate()`, set it to the text prompt tokens that were forwarded before decode.
-3. In `BeamSearch`, scorer initializes state by replaying these histories before beam replication.
+2. In `WhisperReplica::generate()`, set it from prompt tokens that were forwarded before decode.
+3. Filter history to `original_id < _eot_id` before passing it to decoding.
+4. In `BeamSearch`, scorer initializes state by replaying these text histories before beam replication.
 
 Risk:
 
-- Prompt token boundaries must not include non-text Whisper control tokens unless skip policy handles them.
+- Prompt token boundaries must not include non-text Whisper control tokens in initial history. Previous-text prompt behavior beyond this limited replay remains a parity risk.
 
 ## 9. Step 7: Hard Prefix Handling
 
@@ -274,9 +273,16 @@ Current behavior:
 
 Change:
 
-- Detect forced hard-prefix steps.
+- Detect forced hard-prefix steps with:
+
+```text
+use_hard_prefix
+&& any live batch i has step <= prefix_ids[batch_offset[i]].size()
+```
+
 - On those steps, use baseline sampler path and run `update_sample_with_prefix()`.
-- After prefix update, advance/copy LM states from the final selected tokens.
+- After prefix update, build candidate LM states by advancing/copying from the final `topk_ids` and `gather_indices`.
+- This is a whole-step bypass in v1. Per-batch fusion/baseline mixing is out of scope.
 
 Risk:
 
@@ -301,8 +307,8 @@ decoder.update_state(state, gather_indices, _beam_size, keep_batches.get());
 
 Change:
 
-- Before pruning finished batches, gather `candidate_lm_states` with `active_beams`.
-- If `next_batch_size != cur_batch_size`, prune gathered LM states with `non_finished_index`.
+- Before pruning finished batches, gather `candidate_lm_states` with `active_beams` through `LmFusionScorer::gather(...)`.
+- If `next_batch_size != cur_batch_size`, prune gathered LM states with `non_finished_index` through `LmFusionScorer::keep_batches(...)`.
 - Assign result back to `lm_states`.
 
 Risk:
@@ -384,6 +390,15 @@ state: request/beam local
 scorer wrapper: cheap object, can be per request
 ```
 
+Scorer lifetime is fixed from v1:
+
+```text
+WhisperReplica::generate()
+  -> create or fetch shared_ptr<const LmFusionScorer>
+  -> set DecodingOptions::lm_fusion_scorer
+  -> BeamSearch keeps shared_ptr but does not own KenLM cache policy
+```
+
 ## 14. Test Plan
 
 ### 14.1 Decoder Mapping
@@ -413,6 +428,7 @@ Tests:
 - Beam reorder preserves LM state.
 - Finished batch prune preserves LM state order.
 - EOS/final result uses fused score.
+- Candidate shortage fails explicitly.
 - Unsupported modes throw validation errors.
 
 ### 14.3 KenLM Integration Tests

@@ -28,8 +28,11 @@
 - [ ] `LmFusionOptions` 정의
 - [ ] `LmStateBatch` interface 정의
 - [ ] `LmFusionScorer` interface 정의
+- [ ] `LmFusionScorer::gather()` 정의
+- [ ] `LmFusionScorer::keep_batches()` 정의
 - [ ] `DecodingOptions`에 `lm_fusion` 추가
 - [ ] `DecodingOptions`에 `lm_fusion_scorer` 추가
+- [ ] `DecodingOptions`에 `lm_initial_histories` 추가
 - [ ] `BeamSearch` constructor에 fusion options/scorer 주입
 - [ ] `make_search_strategy()` wiring
 
@@ -40,8 +43,7 @@
 - [ ] `asr_topk > 0` validation
 - [ ] scorer null validation
 - [ ] `beam_size > 1` validation
-- [ ] `sampling_topk == 1` validation
-- [ ] `sampling_temperature == 1` validation
+- [ ] deterministic sampler path validation
 - [ ] `return_alternatives == false` validation
 - [ ] `asr_topk <= vocabulary_size` validation
 - [ ] unsupported mode tests 추가
@@ -58,10 +60,13 @@
 - [ ] special/timestamp skip state copy
 - [ ] fused score 계산
 - [ ] batch top `num_candidates` 선택
-- [ ] `topk_ids`, `topk_scores`, `gather_indices` 출력 계약 유지
-- [ ] hard-prefix forced step 우회 처리
-- [ ] active beam 선택 후 LM state gather
-- [ ] finished batch prune 후 LM state prune
+- [ ] `topk_ids`는 output token id로 유지
+- [ ] `gather_indices`는 beam origin으로 유지
+- [ ] candidate 부족 시 explicit error
+- [ ] hard-prefix forced step whole-step 우회 처리
+- [ ] prefix update 후 최종 token 기준 candidate LM state 생성
+- [ ] active beam 선택 후 `LmFusionScorer::gather()`로 LM state gather
+- [ ] finished batch prune 후 `LmFusionScorer::keep_batches()`로 LM state prune
 
 ## 6. Whisper API Wiring
 
@@ -71,6 +76,7 @@
 - [ ] `WhisperOptions::lm_fusion_debug` 추가
 - [ ] `WhisperReplica::generate()`에서 `text_token_limit = _eot_id` 전달
 - [ ] prompt replay용 initial history 전달
+- [ ] initial history는 `original_id < _eot_id` text token으로 제한
 - [ ] Python `WhisperWrapper::generate()` signature 확장
 - [ ] pybind keyword list 확장
 - [ ] Python docstring에 fused score 의미 명시
