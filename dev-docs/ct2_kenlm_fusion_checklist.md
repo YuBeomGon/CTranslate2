@@ -50,23 +50,23 @@
 
 ## 5. BeamSearch Fusion
 
-- [ ] fusion enabled 시 `expand_after_first_step` 비활성화
-- [ ] LM state 초기화
+- [x] fusion enabled 시 `expand_after_first_step` 비활성화
+- [x] LM state 초기화
 - [ ] prompt history replay hook 추가
-- [ ] row-wise ASR top-k 추출
-- [ ] output id padding skip
-- [ ] output id to original id 변환
-- [ ] text token LM score 적용
-- [ ] special/timestamp skip state copy
-- [ ] fused score 계산
-- [ ] batch top `num_candidates` 선택
-- [ ] `topk_ids`는 output token id로 유지
-- [ ] `gather_indices`는 beam origin으로 유지
-- [ ] candidate 부족 시 explicit error
-- [ ] hard-prefix forced step whole-step 우회 처리
-- [ ] prefix update 후 최종 token 기준 candidate LM state 생성
-- [ ] active beam 선택 후 `LmFusionScorer::gather()`로 LM state gather
-- [ ] finished batch prune 후 `LmFusionScorer::keep_batches()`로 LM state prune
+- [x] row-wise ASR top-k 추출
+- [x] output id padding skip
+- [x] output id to original id 변환
+- [x] text token LM score 적용
+- [x] special/timestamp skip state copy
+- [x] fused score 계산
+- [x] batch top `num_candidates` 선택
+- [x] `topk_ids`는 output token id로 유지
+- [x] `gather_indices`는 beam origin으로 유지
+- [x] candidate 부족 시 explicit error
+- [x] hard-prefix forced step whole-step 우회 처리
+- [x] prefix update 후 최종 token 기준 candidate LM state 생성
+- [x] active beam 선택 후 `LmFusionScorer::gather()`로 LM state gather
+- [x] finished batch prune 후 `LmFusionScorer::keep_batches()`로 LM state prune
 
 ## 6. Whisper API Wiring
 
@@ -100,10 +100,10 @@
 
 - [x] Decoder padding id accessor test
 - [ ] fusion-off baseline parity test
-- [ ] top-k 내부 LM winner test
-- [ ] top-k 밖 no-rescue test
+- [x] top-k 내부 LM winner test
+- [x] top-k 밖 no-rescue test
 - [ ] special/timestamp skip test
-- [ ] beam reorder state alignment test
+- [x] beam reorder state alignment test
 - [ ] finished batch prune state alignment test
 - [ ] hard-prefix state sync test
 - [ ] fused EOS/final score test

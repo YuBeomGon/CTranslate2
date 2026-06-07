@@ -163,22 +163,6 @@ TEST(ModelTest, DecodeLmFusionRejectsRandomSampling) {
   EXPECT_THROW(decode(decoder, state, {{1}}, {2}, options), std::invalid_argument);
 }
 
-TEST(ModelTest, DecodeLmFusionDeterministicTemperatureZeroReachesStub) {
-  auto model = models::Model::load(default_model_dir())->as_sequence_to_sequence();
-  auto& decoder = dynamic_cast<models::EncoderDecoderReplica&>(*model).decoder();
-
-  layers::DecoderState state = decoder.initial_state();
-  DecodingOptions options;
-  options.beam_size = 2;
-  options.sampling_topk = 2;
-  options.sampling_temperature = 0;
-  options.lm_fusion.alpha = 0.1f;
-  options.lm_fusion.asr_topk = 2;
-  options.lm_fusion_scorer = std::make_shared<DummyLmFusionScorer>();
-
-  EXPECT_THROW(decode(decoder, state, {{1}}, {2}, options), std::runtime_error);
-}
-
 TEST(ModelTest, LayerExists) {
   const auto model = models::Model::load(default_model_dir());
   EXPECT_TRUE(model->layer_exists("encoder/layer_0"));

@@ -115,6 +115,169 @@ namespace ctranslate2 {
     return beam_origins;
   }
 
+  struct LmFusionCandidate {
+    dim_t batch_id;
+    int32_t output_id;
+    int32_t beam_origin;
+    float score;
+    size_t state_index;
+  };
+
+  struct LmFusionSelection {
+    StorageView ids;
+    StorageView scores;
+    StorageView gather_indices;
+    std::unique_ptr<LmStateBatch> candidate_states;
+  };
+
+  static bool should_score_lm_token(const LmFusionOptions& options, size_t original_token_id) {
+    return options.text_token_limit == 0 || original_token_id < options.text_token_limit;
+  }
+
+  static void set_score(StorageView& scores, dim_t index, float score) {
+    TYPE_DISPATCH(scores.dtype(), scores.at<T>(index) = static_cast<T>(score));
+  }
+
+  static std::vector<int32_t> storage_to_vector(const StorageView& storage) {
+    StorageView cpu_storage = storage.device() == Device::CPU ? storage : storage.to(Device::CPU);
+    std::vector<int32_t> values(cpu_storage.size());
+    const auto* data = cpu_storage.data<int32_t>();
+    std::copy(data, data + cpu_storage.size(), values.begin());
+    return values;
+  }
+
+  static bool has_hard_prefix_update_step(const dim_t step,
+                                          const std::vector<std::vector<size_t>>& prefix_ids,
+                                          const std::vector<dim_t>& batch_offset) {
+    for (dim_t i = 0; i < static_cast<dim_t>(batch_offset.size()); ++i) {
+      if (step <= static_cast<dim_t>(prefix_ids[batch_offset[i]].size()))
+        return true;
+    }
+    return false;
+  }
+
+  static LmFusionSelection
+  select_fused_candidates_topk_strict(const layers::Decoder& decoder,
+                                      const StorageView& log_probs,
+                                      const dim_t cur_batch_size,
+                                      const dim_t beam_size,
+                                      const dim_t vocabulary_size,
+                                      const dim_t num_candidates,
+                                      const bool is_expanded,
+                                      const LmFusionScorer& scorer,
+                                      const LmFusionOptions& options,
+                                      const LmStateBatch& lm_states) {
+    const dim_t rows = log_probs.dim(0);
+    StorageView row_topk_scores(log_probs.dtype());
+    StorageView row_topk_ids(DataType::INT32);
+    ops::TopK(static_cast<dim_t>(options.asr_topk))(log_probs, row_topk_scores, row_topk_ids);
+    row_topk_scores = row_topk_scores.to(Device::CPU);
+    row_topk_ids = row_topk_ids.to(Device::CPU);
+
+    std::vector<std::vector<LmFusionCandidate>> candidates(cur_batch_size);
+    auto all_candidate_states = lm_states.clone_empty(rows * static_cast<dim_t>(options.asr_topk));
+    size_t next_state_index = 0;
+
+    for (dim_t row = 0; row < rows; ++row) {
+      const dim_t batch_id = is_expanded ? row / beam_size : row;
+      const dim_t beam_id = is_expanded ? row % beam_size : 0;
+      const int32_t beam_origin = is_expanded ? static_cast<int32_t>(batch_id * beam_size + beam_id)
+                                              : static_cast<int32_t>(batch_id);
+
+      for (dim_t k = 0; k < static_cast<dim_t>(options.asr_topk); ++k) {
+        const int32_t output_id = row_topk_ids.at<int32_t>({row, k});
+        if (output_id < 0 || output_id >= vocabulary_size)
+          continue;
+        if (decoder.is_padding_output_id(output_id))
+          continue;
+
+        const size_t original_id = decoder.output_layer_is_updated()
+          ? decoder.to_original_word_id(output_id)
+          : static_cast<size_t>(output_id);
+        const float asr_score = row_topk_scores.scalar_at<float>({row, k});
+        float lm_score = 0;
+
+        if (should_score_lm_token(options, original_id)) {
+          lm_score = scorer.score_token(lm_states,
+                                        beam_origin,
+                                        original_id,
+                                        *all_candidate_states,
+                                        next_state_index);
+        } else {
+          scorer.copy_state(lm_states, beam_origin, *all_candidate_states, next_state_index);
+        }
+
+        candidates[batch_id].push_back({batch_id,
+                                        output_id,
+                                        beam_origin,
+                                        asr_score + options.alpha * lm_score,
+                                        next_state_index});
+        ++next_state_index;
+      }
+    }
+
+    LmFusionSelection selection;
+    selection.ids = StorageView({cur_batch_size, num_candidates}, DataType::INT32);
+    selection.scores = StorageView({cur_batch_size, num_candidates}, log_probs.dtype());
+    selection.gather_indices = StorageView({cur_batch_size * num_candidates}, DataType::INT32);
+    selection.candidate_states = lm_states.clone_empty(cur_batch_size * num_candidates);
+
+    for (dim_t batch = 0; batch < cur_batch_size; ++batch) {
+      auto& batch_candidates = candidates[batch];
+      if (batch_candidates.size() < static_cast<size_t>(num_candidates))
+        throw std::runtime_error("LM fusion produced fewer candidates than required");
+
+      std::partial_sort(batch_candidates.begin(),
+                        batch_candidates.begin() + num_candidates,
+                        batch_candidates.end(),
+                        [](const LmFusionCandidate& a, const LmFusionCandidate& b) {
+                          return a.score > b.score;
+                        });
+
+      for (dim_t k = 0; k < num_candidates; ++k) {
+        const auto& candidate = batch_candidates[k];
+        const dim_t flat_index = batch * num_candidates + k;
+        selection.ids.at<int32_t>(flat_index) = candidate.output_id;
+        selection.gather_indices.at<int32_t>(flat_index) = candidate.beam_origin;
+        set_score(selection.scores, flat_index, candidate.score);
+        scorer.copy_state(*all_candidate_states,
+                          candidate.state_index,
+                          *selection.candidate_states,
+                          flat_index);
+      }
+    }
+
+    return selection;
+  }
+
+  static std::unique_ptr<LmStateBatch>
+  advance_lm_states_for_selected_candidates(const layers::Decoder& decoder,
+                                            const StorageView& topk_ids,
+                                            const StorageView& gather_indices,
+                                            const LmFusionScorer& scorer,
+                                            const LmFusionOptions& options,
+                                            const LmStateBatch& lm_states) {
+    auto candidate_states = lm_states.clone_empty(topk_ids.size());
+    for (dim_t i = 0; i < topk_ids.size(); ++i) {
+      const int32_t output_id = topk_ids.at<int32_t>(i);
+      const int32_t beam_origin = gather_indices.at<int32_t>(i);
+      if (output_id < 0 || decoder.is_padding_output_id(output_id)) {
+        scorer.copy_state(lm_states, beam_origin, *candidate_states, i);
+        continue;
+      }
+
+      const size_t original_id = decoder.output_layer_is_updated()
+        ? decoder.to_original_word_id(output_id)
+        : static_cast<size_t>(output_id);
+
+      if (should_score_lm_token(options, original_id))
+        scorer.score_token(lm_states, beam_origin, original_id, *candidate_states, i);
+      else
+        scorer.copy_state(lm_states, beam_origin, *candidate_states, i);
+    }
+    return candidate_states;
+  }
+
   static void append_step_output(StorageView& history,    // [batch, beam, time, ...]
                                  StorageView step_output,  // [batch, beam, ...]
                                  const StorageView* beam_origins = nullptr) {
@@ -461,7 +624,6 @@ namespace ctranslate2 {
     if (use_lm_fusion) {
       if (_lm_fusion.asr_topk > static_cast<size_t>(vocabulary_size))
         throw std::invalid_argument("The LM fusion ASR top-k cannot exceed the decoder output size");
-      throw std::runtime_error("LM fusion candidate selection is not implemented yet");
     }
 
     // We get more candidates than the beam size so that if half the candidates are EOS,
@@ -470,7 +632,8 @@ namespace ctranslate2 {
 
     // Only the first beam is considered in the first step. As an additional optimization
     // we try to run the first step without expanding the batch size.
-    const bool expand_after_first_step = (device == Device::CPU
+    const bool expand_after_first_step = (!use_lm_fusion
+                                          && device == Device::CPU
                                           && num_candidates <= vocabulary_size);
 
     // We can exit early when the first beam finishes and no penalties are used.
@@ -492,6 +655,10 @@ namespace ctranslate2 {
       repeat_batch(topk_ids, _beam_size);
       TYPE_DISPATCH(dtype, initialize_beam_scores<T>(topk_scores, batch_size, _beam_size));
     }
+
+    std::unique_ptr<LmStateBatch> lm_states;
+    if (use_lm_fusion)
+      lm_states = _lm_fusion_scorer->make_initial_states(batch_size * _beam_size);
 
     std::unique_ptr<BiasedDecoder> biased_decoder;
     std::vector<std::vector<bool>> beams_diverged_from_prefix;
@@ -575,14 +742,38 @@ namespace ctranslate2 {
                                                                     log_probs.size()));
       }
 
-      // Flatten the probs into a list of candidates.
-      log_probs.reshape({cur_batch_size, -1});
+      const bool bypass_lm_fusion = (use_lm_fusion
+                                     && use_hard_prefix
+                                     && has_hard_prefix_update_step(step, *prefix_ids, batch_offset));
+      std::unique_ptr<LmStateBatch> candidate_lm_states;
+      StorageView gather_indices;
 
-      // TopK candidates.
-      sampler(log_probs, topk_ids, topk_scores, num_candidates);
+      if (use_lm_fusion && !bypass_lm_fusion) {
+        auto selection = select_fused_candidates_topk_strict(decoder,
+                                                            log_probs,
+                                                            cur_batch_size,
+                                                            _beam_size,
+                                                            vocabulary_size,
+                                                            num_candidates,
+                                                            is_expanded,
+                                                            *_lm_fusion_scorer,
+                                                            _lm_fusion,
+                                                            *lm_states);
+        topk_ids = std::move(selection.ids);
+        topk_scores = std::move(selection.scores);
+        gather_indices = std::move(selection.gather_indices);
+        candidate_lm_states = std::move(selection.candidate_states);
 
-      // Unflatten the ids.
-      StorageView gather_indices = unflatten_ids(topk_ids, _beam_size, vocabulary_size, is_expanded);
+      } else {
+        // Flatten the probs into a list of candidates.
+        log_probs.reshape({cur_batch_size, -1});
+
+        // TopK candidates.
+        sampler(log_probs, topk_ids, topk_scores, num_candidates);
+
+        // Unflatten the ids.
+        gather_indices = unflatten_ids(topk_ids, _beam_size, vocabulary_size, is_expanded);
+      }
 
       if (prefix_ids) {
         if (use_hard_prefix) {
@@ -602,6 +793,15 @@ namespace ctranslate2 {
                                                                         *prefix_ids,
                                                                         batch_offset);
         }
+      }
+
+      if (use_lm_fusion && bypass_lm_fusion) {
+        candidate_lm_states = advance_lm_states_for_selected_candidates(decoder,
+                                                                        topk_ids,
+                                                                        gather_indices,
+                                                                        *_lm_fusion_scorer,
+                                                                        _lm_fusion,
+                                                                        *lm_states);
       }
 
       // Append last prediction.
@@ -701,6 +901,13 @@ namespace ctranslate2 {
       }
 
       gather(gather_indices, active_beams);
+      if (use_lm_fusion) {
+        auto selected_lm_states = candidate_lm_states->clone_empty(cur_batch_size * _beam_size);
+        _lm_fusion_scorer->gather(*candidate_lm_states,
+                                  storage_to_vector(active_beams),
+                                  *selected_lm_states);
+        lm_states = std::move(selected_lm_states);
+      }
       gather_beam_flat(topk_ids, active_beams, _beam_size);
       gather_beam_flat(topk_scores, active_beams, _beam_size);
       gather_beam_flat(alive_seq, active_beams, _beam_size);
@@ -721,6 +928,14 @@ namespace ctranslate2 {
         gather(alive_seq, *keep_batches);
         if (alive_attention)
           gather(alive_attention, *keep_batches);
+        if (use_lm_fusion) {
+          auto pruned_lm_states = lm_states->clone_empty(next_batch_size * _beam_size);
+          _lm_fusion_scorer->keep_batches(*lm_states,
+                                          non_finished_index,
+                                          _beam_size,
+                                          *pruned_lm_states);
+          lm_states = std::move(pruned_lm_states);
+        }
         if (keep_batches->device() != device)
           *keep_batches = keep_batches->to(device);
       }
