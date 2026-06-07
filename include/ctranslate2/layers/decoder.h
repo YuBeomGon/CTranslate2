@@ -60,6 +60,16 @@ namespace ctranslate2 {
         return !_to_original_word_id.empty();
       }
 
+      dim_t effective_output_size() const {
+        return output_layer_is_updated() ? _effective_output_size : output_size();
+      }
+
+      bool is_padding_output_id(size_t output_id) const {
+        return (output_layer_is_updated()
+                && output_id >= static_cast<size_t>(_effective_output_size)
+                && output_id < static_cast<size_t>(output_size()));
+      }
+
       bool is_in_output(size_t word_id) const {
         return _to_output_word_id.find(word_id) != _to_output_word_id.end();
       }
@@ -96,6 +106,7 @@ namespace ctranslate2 {
       std::vector<size_t> _to_original_word_id;
       std::unordered_map<size_t, size_t> _to_output_word_id;
       dim_t _vocabulary_size = 0;
+      dim_t _effective_output_size = 0;
     };
 
 

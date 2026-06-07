@@ -78,7 +78,8 @@ namespace ctranslate2 {
 
       std::vector<size_t> ids = restrict_ids;
 
-      dim_t new_output_size = ids.empty() ? _vocabulary_size : ids.size();
+      const dim_t effective_output_size = ids.empty() ? _vocabulary_size : ids.size();
+      dim_t new_output_size = effective_output_size;
       dim_t padding_size = 0;
       if (new_output_size % size_multiple != 0) {
         padding_size = size_multiple - (new_output_size % size_multiple);
@@ -95,6 +96,7 @@ namespace ctranslate2 {
           output_layer().select_weights(nullptr);
           _to_output_word_id.clear();
           _to_original_word_id.clear();
+          _effective_output_size = 0;
           return;
         }
 
@@ -133,6 +135,7 @@ namespace ctranslate2 {
       output_layer().select_weights(&index, extra_bias.get());
 
       _to_original_word_id = std::move(ids);
+      _effective_output_size = effective_output_size;
       _to_output_word_id.reserve(_to_original_word_id.size());
       for (size_t i = 0; i < _to_original_word_id.size(); ++i)
         _to_output_word_id.emplace(_to_original_word_id[i], i);

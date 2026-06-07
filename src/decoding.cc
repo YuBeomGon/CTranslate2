@@ -4,6 +4,7 @@
 #include <cmath>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 
 #include "ctranslate2/ops/ops.h"
 #include "dispatch.h"
@@ -356,6 +357,14 @@ namespace ctranslate2 {
     return std::round(float(beam_size) * patience);
   }
 
+  static inline bool lm_fusion_requested(const LmFusionOptions& options) {
+    return options.alpha > 0;
+  }
+
+  static inline bool is_deterministic_sampler_path(const DecodingOptions& options) {
+    return options.sampling_topk == 1 || options.sampling_temperature == 0;
+  }
+
   static dim_t get_max_step(const dim_t max_length,
                             const bool return_prefix,
                             const std::vector<std::vector<size_t>>* prefix_ids) {
@@ -412,12 +421,16 @@ namespace ctranslate2 {
                          const float length_penalty,
                          const float coverage_penalty,
                          const float prefix_bias_beta,
-                         const float patience)
+                         const float patience,
+                         std::shared_ptr<const LmFusionScorer> lm_fusion_scorer,
+                         LmFusionOptions lm_fusion)
     : _beam_size(beam_size)
     , _length_penalty(length_penalty)
     , _coverage_penalty(coverage_penalty)
     , _prefix_bias_beta(prefix_bias_beta)
     , _max_candidates(get_max_candidates(beam_size, patience))
+    , _lm_fusion_scorer(std::move(lm_fusion_scorer))
+    , _lm_fusion(std::move(lm_fusion))
   {
   }
 
@@ -443,6 +456,13 @@ namespace ctranslate2 {
     const DataType dtype = decoder.output_type();
     const dim_t vocabulary_size = decoder.output_size();
     const dim_t batch_size = start_ids.size();
+    const bool use_lm_fusion = lm_fusion_requested(_lm_fusion);
+
+    if (use_lm_fusion) {
+      if (_lm_fusion.asr_topk > static_cast<size_t>(vocabulary_size))
+        throw std::invalid_argument("The LM fusion ASR top-k cannot exceed the decoder output size");
+      throw std::runtime_error("LM fusion candidate selection is not implemented yet");
+    }
 
     // We get more candidates than the beam size so that if half the candidates are EOS,
     // we can replace finished hypotheses with active beams.
@@ -1053,6 +1073,19 @@ namespace ctranslate2 {
       throw std::invalid_argument("The callback function is not compatible with "
                                   "beam_size > 1 or prefix_bias_beta > 0");
 
+    if (lm_fusion_requested(options.lm_fusion)) {
+      if (options.lm_fusion.asr_topk == 0)
+        throw std::invalid_argument("The LM fusion ASR top-k must be > 0");
+      if (!options.lm_fusion_scorer)
+        throw std::invalid_argument("LM fusion requires a scorer");
+      if (options.beam_size == 1)
+        throw std::invalid_argument("LM fusion requires beam search with beam_size > 1");
+      if (!is_deterministic_sampler_path(options))
+        throw std::invalid_argument("LM fusion is not compatible with random sampling");
+      if (options.return_alternatives)
+        throw std::invalid_argument("LM fusion is not compatible with return_alternatives");
+    }
+
     if (options.sampling_topp <= 0 || options.sampling_topp > 1)
       throw std::invalid_argument("The sampling_topp parameter must be between 0 and 1");
     if (options.sampling_topp < 1
@@ -1084,7 +1117,9 @@ namespace ctranslate2 {
                                           options.length_penalty,
                                           options.coverage_penalty,
                                           options.prefix_bias_beta,
-                                          options.patience);
+                                          options.patience,
+                                          options.lm_fusion_scorer,
+                                          options.lm_fusion);
   }
 
   static std::vector<std::shared_ptr<LogitsProcessor>>
@@ -1314,6 +1349,9 @@ namespace ctranslate2 {
 
     if (batch_size == 0)
       throw std::invalid_argument("No decoder start tokens are set");
+    if (!options.lm_initial_histories.empty()
+        && options.lm_initial_histories.size() != batch_size)
+      throw std::invalid_argument("The LM fusion initial histories must match the batch size");
 
     std::vector<DecodingResult> results;
 

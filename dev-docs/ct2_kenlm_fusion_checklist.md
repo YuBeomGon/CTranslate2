@@ -15,37 +15,37 @@
 
 ## 2. Decoder Mapping
 
-- [ ] `Decoder`에 `_effective_output_size` 추가
-- [ ] `Decoder::effective_output_size()` 추가
-- [ ] `Decoder::is_padding_output_id()` 추가
-- [ ] `update_output_layer()`에서 padding 전 effective size 저장
-- [ ] output layer reset 경로에서 effective size 정리
-- [ ] `tests/model_test.cc`에 padding accessor test 추가
+- [x] `Decoder`에 `_effective_output_size` 추가
+- [x] `Decoder::effective_output_size()` 추가
+- [x] `Decoder::is_padding_output_id()` 추가
+- [x] `update_output_layer()`에서 padding 전 effective size 저장
+- [x] output layer reset 경로에서 effective size 정리
+- [x] `tests/model_test.cc`에 padding accessor test 추가
 
 ## 3. Internal Fusion API
 
-- [ ] `include/ctranslate2/lm_fusion.h` 추가
-- [ ] `LmFusionOptions` 정의
-- [ ] `LmStateBatch` interface 정의
-- [ ] `LmFusionScorer` interface 정의
-- [ ] `LmFusionScorer::gather()` 정의
-- [ ] `LmFusionScorer::keep_batches()` 정의
-- [ ] `DecodingOptions`에 `lm_fusion` 추가
-- [ ] `DecodingOptions`에 `lm_fusion_scorer` 추가
-- [ ] `DecodingOptions`에 `lm_initial_histories` 추가
-- [ ] `BeamSearch` constructor에 fusion options/scorer 주입
-- [ ] `make_search_strategy()` wiring
+- [x] `include/ctranslate2/lm_fusion.h` 추가
+- [x] `LmFusionOptions` 정의
+- [x] `LmStateBatch` interface 정의
+- [x] `LmFusionScorer` interface 정의
+- [x] `LmFusionScorer::gather()` 정의
+- [x] `LmFusionScorer::keep_batches()` 정의
+- [x] `DecodingOptions`에 `lm_fusion` 추가
+- [x] `DecodingOptions`에 `lm_fusion_scorer` 추가
+- [x] `DecodingOptions`에 `lm_initial_histories` 추가
+- [x] `BeamSearch` constructor에 fusion options/scorer 주입
+- [x] `make_search_strategy()` wiring
 
 ## 4. Validation
 
-- [ ] fusion enabled helper 추가
+- [x] fusion enabled helper 추가
 - [ ] `alpha > 0` validation
-- [ ] `asr_topk > 0` validation
-- [ ] scorer null validation
-- [ ] `beam_size > 1` validation
-- [ ] deterministic sampler path validation
-- [ ] `return_alternatives == false` validation
-- [ ] `asr_topk <= vocabulary_size` validation
+- [x] `asr_topk > 0` validation
+- [x] scorer null validation
+- [x] `beam_size > 1` validation
+- [x] deterministic sampler path validation
+- [x] `return_alternatives == false` validation
+- [x] `asr_topk <= vocabulary_size` validation
 - [ ] unsupported mode tests 추가
 
 ## 5. BeamSearch Fusion
@@ -98,7 +98,7 @@
 
 ## 8. Tests
 
-- [ ] Decoder padding id accessor test
+- [x] Decoder padding id accessor test
 - [ ] fusion-off baseline parity test
 - [ ] top-k 내부 LM winner test
 - [ ] top-k 밖 no-rescue test

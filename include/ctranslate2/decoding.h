@@ -1,11 +1,13 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 
 #include "ctranslate2/decoding_utils.h"
 #include "ctranslate2/devices.h"
 #include "ctranslate2/layers/decoder.h"
+#include "ctranslate2/lm_fusion.h"
 #include "ctranslate2/sampling.h"
 #include "ctranslate2/storage_view.h"
 
@@ -57,7 +59,9 @@ namespace ctranslate2 {
                const float length_penalty = 0,
                const float coverage_penalty = 0,
                const float prefix_bias_beta = 0,
-               const float patience = 1);
+               const float patience = 1,
+               std::shared_ptr<const LmFusionScorer> lm_fusion_scorer = nullptr,
+               LmFusionOptions lm_fusion = {});
 
     std::vector<DecodingResult>
     search(layers::Decoder& decoder,
@@ -83,6 +87,8 @@ namespace ctranslate2 {
     const float _coverage_penalty;
     const float _prefix_bias_beta;
     const size_t _max_candidates;
+    const std::shared_ptr<const LmFusionScorer> _lm_fusion_scorer;
+    const LmFusionOptions _lm_fusion;
   };
 
   class BiasedDecoder {
@@ -162,6 +168,9 @@ namespace ctranslate2 {
     std::vector<size_t> disable_ids_begin;
     std::vector<std::vector<size_t>> disable_sequences;
     std::vector<std::shared_ptr<LogitsProcessor>> logits_processors;
+    std::shared_ptr<const LmFusionScorer> lm_fusion_scorer = nullptr;
+    LmFusionOptions lm_fusion;
+    std::vector<std::vector<size_t>> lm_initial_histories;
     std::function<bool(DecodingStepResult)> callback = nullptr;
   };
 
