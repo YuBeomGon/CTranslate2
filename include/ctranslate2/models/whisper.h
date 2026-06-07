@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "ctranslate2/generation.h"
 #include "ctranslate2/layers/whisper.h"
 #include "ctranslate2/models/model.h"
@@ -56,6 +58,18 @@ namespace ctranslate2 {
       // List of token IDs to suppress.
       // -1 will suppress a default set of symbols as defined in the model config.json file.
       std::vector<int> suppress_tokens = {-1};
+
+      // Path to a KenLM binary trained on Whisper BPE pseudo words t<ID>.
+      std::string lm_fusion_model_path;
+
+      // Fusion weight. Disabled when <= 0 or when lm_fusion_model_path is empty.
+      float lm_fusion_alpha = 0;
+
+      // Number of ASR candidates per beam to rescore with KenLM.
+      size_t lm_fusion_asr_topk = 50;
+
+      // Enable optional LM fusion debug counters/logging.
+      bool lm_fusion_debug = false;
     };
 
     struct WhisperGenerationResult {

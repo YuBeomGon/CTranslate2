@@ -70,15 +70,15 @@
 
 ## 6. Whisper API Wiring
 
-- [ ] `WhisperOptions::lm_fusion_model_path` 추가
-- [ ] `WhisperOptions::lm_fusion_alpha` 추가
-- [ ] `WhisperOptions::lm_fusion_asr_topk` 추가
-- [ ] `WhisperOptions::lm_fusion_debug` 추가
-- [ ] `WhisperReplica::generate()`에서 `text_token_limit = _eot_id` 전달
-- [ ] prompt replay용 initial history 전달
-- [ ] initial history는 `original_id < _eot_id` text token으로 제한
-- [ ] Python `WhisperWrapper::generate()` signature 확장
-- [ ] pybind keyword list 확장
+- [x] `WhisperOptions::lm_fusion_model_path` 추가
+- [x] `WhisperOptions::lm_fusion_alpha` 추가
+- [x] `WhisperOptions::lm_fusion_asr_topk` 추가
+- [x] `WhisperOptions::lm_fusion_debug` 추가
+- [x] `WhisperReplica::generate()`에서 `text_token_limit = _eot_id` 전달
+- [x] prompt replay용 initial history 전달
+- [x] initial history는 `original_id < _eot_id` text token으로 제한
+- [x] Python `WhisperWrapper::generate()` signature 확장
+- [x] pybind keyword list 확장
 - [ ] Python docstring에 fused score 의미 명시
 
 ## 7. KenLM Build and Scorer

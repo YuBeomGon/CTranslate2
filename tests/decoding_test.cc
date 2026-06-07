@@ -87,7 +87,7 @@ namespace {
       size_t out = 0;
       for (const int32_t batch_id : kept_batch_ids) {
         for (dim_t beam = 0; beam < beam_size; ++beam)
-        d.states[out++] = s.states[batch_id * beam_size + beam];
+          d.states[out++] = s.states[batch_id * beam_size + beam];
       }
     }
 

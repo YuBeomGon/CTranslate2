@@ -46,7 +46,11 @@ namespace ctranslate2 {
                bool suppress_blank,
                const std::optional<std::vector<int>>& suppress_tokens,
                size_t sampling_topk,
-               float sampling_temperature) {
+               float sampling_temperature,
+               const std::optional<std::string>& lm_fusion_model_path,
+               float lm_fusion_alpha,
+               size_t lm_fusion_asr_topk,
+               bool lm_fusion_debug) {
         std::vector<std::future<models::WhisperGenerationResult>> futures;
 
         models::WhisperOptions options;
@@ -64,6 +68,11 @@ namespace ctranslate2 {
         options.return_no_speech_prob = return_no_speech_prob;
         options.max_initial_timestamp_index = max_initial_timestamp_index;
         options.suppress_blank = suppress_blank;
+        if (lm_fusion_model_path)
+          options.lm_fusion_model_path = lm_fusion_model_path.value();
+        options.lm_fusion_alpha = lm_fusion_alpha;
+        options.lm_fusion_asr_topk = lm_fusion_asr_topk;
+        options.lm_fusion_debug = lm_fusion_debug;
 
         if (suppress_tokens)
           options.suppress_tokens = suppress_tokens.value();
@@ -259,6 +268,10 @@ namespace ctranslate2 {
              py::arg("suppress_tokens")=std::vector<int>{-1},
              py::arg("sampling_topk")=1,
              py::arg("sampling_temperature")=1,
+             py::arg("lm_fusion_model_path")=py::none(),
+             py::arg("lm_fusion_alpha")=0,
+             py::arg("lm_fusion_asr_topk")=50,
+             py::arg("lm_fusion_debug")=false,
              py::call_guard<py::gil_scoped_release>(),
              R"pbdoc(
                  Encodes the input features and generates from the given prompt.
@@ -291,6 +304,10 @@ namespace ctranslate2 {
                      of symbols as defined in the model ``config.json`` file.
                    sampling_topk: Randomly sample predictions from the top K candidates.
                    sampling_temperature: Sampling temperature to generate more random samples.
+                   lm_fusion_model_path: Path to a KenLM binary trained on Whisper BPE token IDs.
+                   lm_fusion_alpha: Weight applied to KenLM token log probabilities.
+                   lm_fusion_asr_topk: Number of ASR candidates per beam to rescore with KenLM.
+                   lm_fusion_debug: Enable optional LM fusion debug output.
 
                  Returns:
                    A list of generation results.

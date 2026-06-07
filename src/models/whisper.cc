@@ -255,6 +255,7 @@ namespace ctranslate2 {
 
       const bool sot_is_start_token = (sot_index == prompt_length - 1);
       std::vector<std::vector<size_t>> start_tokens;
+      std::vector<std::vector<size_t>> lm_initial_histories(prompts.size());
       std::vector<float> no_speech_probs;
       dim_t start_step = 0;
 
@@ -268,6 +269,12 @@ namespace ctranslate2 {
         for (const auto& prompt : prompts) {
           prompt_tokens.emplace_back(prompt.begin(), prompt.begin() + prompt_length - 1);
           start_tokens.emplace_back(prompt.begin() + prompt_length - 1, prompt.end());
+        }
+        for (size_t i = 0; i < prompt_tokens.size(); ++i) {
+          for (const size_t token_id : prompt_tokens[i]) {
+            if (token_id < _eot_id)
+              lm_initial_histories[i].push_back(token_id);
+          }
         }
 
         const Device device = _decoder->device();
@@ -307,6 +314,15 @@ namespace ctranslate2 {
       decoding_options.return_scores = options.return_scores;
       decoding_options.return_logits_vocab = options.return_logits_vocab;
       decoding_options.include_eos_in_hypotheses = false;
+
+      if (!options.lm_fusion_model_path.empty() && options.lm_fusion_alpha > 0) {
+        decoding_options.lm_fusion.alpha = options.lm_fusion_alpha;
+        decoding_options.lm_fusion.asr_topk = options.lm_fusion_asr_topk;
+        decoding_options.lm_fusion.text_token_limit = _eot_id;
+        decoding_options.lm_fusion.debug = options.lm_fusion_debug;
+        decoding_options.lm_initial_histories = std::move(lm_initial_histories);
+        throw std::runtime_error("Whisper KenLM fusion scorer is not implemented yet");
+      }
 
       for (const auto& id : options.suppress_tokens) {
         if (id >= 0)
