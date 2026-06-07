@@ -116,7 +116,6 @@ namespace ctranslate2 {
   }
 
   struct LmFusionCandidate {
-    dim_t batch_id;
     int32_t output_id;
     int32_t beam_origin;
     float score;
@@ -168,8 +167,8 @@ namespace ctranslate2 {
                                       const LmFusionOptions& options,
                                       const LmStateBatch& lm_states) {
     const dim_t rows = log_probs.dim(0);
-    StorageView row_topk_scores(log_probs.dtype());
-    StorageView row_topk_ids(DataType::INT32);
+    StorageView row_topk_scores(log_probs.dtype(), log_probs.device());
+    StorageView row_topk_ids(DataType::INT32, log_probs.device());
     ops::TopK(static_cast<dim_t>(options.asr_topk))(log_probs, row_topk_scores, row_topk_ids);
     row_topk_scores = row_topk_scores.to(Device::CPU);
     row_topk_ids = row_topk_ids.to(Device::CPU);
@@ -207,8 +206,7 @@ namespace ctranslate2 {
           scorer.copy_state(lm_states, beam_origin, *all_candidate_states, next_state_index);
         }
 
-        candidates[batch_id].push_back({batch_id,
-                                        output_id,
+        candidates[batch_id].push_back({output_id,
                                         beam_origin,
                                         asr_score + options.alpha * lm_score,
                                         next_state_index});
