@@ -584,7 +584,8 @@ namespace ctranslate2 {
                          const float prefix_bias_beta,
                          const float patience,
                          std::shared_ptr<const LmFusionScorer> lm_fusion_scorer,
-                         LmFusionOptions lm_fusion)
+                         LmFusionOptions lm_fusion,
+                         std::vector<std::vector<size_t>> lm_initial_histories)
     : _beam_size(beam_size)
     , _length_penalty(length_penalty)
     , _coverage_penalty(coverage_penalty)
@@ -592,6 +593,7 @@ namespace ctranslate2 {
     , _max_candidates(get_max_candidates(beam_size, patience))
     , _lm_fusion_scorer(std::move(lm_fusion_scorer))
     , _lm_fusion(std::move(lm_fusion))
+    , _lm_initial_histories(std::move(lm_initial_histories))
   {
   }
 
@@ -655,8 +657,12 @@ namespace ctranslate2 {
     }
 
     std::unique_ptr<LmStateBatch> lm_states;
-    if (use_lm_fusion)
-      lm_states = _lm_fusion_scorer->make_initial_states(batch_size * _beam_size);
+    if (use_lm_fusion) {
+      const auto* initial_histories = _lm_initial_histories.empty() ? nullptr : &_lm_initial_histories;
+      lm_states = _lm_fusion_scorer->make_initial_states(batch_size * _beam_size,
+                                                         initial_histories,
+                                                         _beam_size);
+    }
 
     std::unique_ptr<BiasedDecoder> biased_decoder;
     std::vector<std::vector<bool>> beams_diverged_from_prefix;
@@ -1332,7 +1338,8 @@ namespace ctranslate2 {
                                           options.prefix_bias_beta,
                                           options.patience,
                                           options.lm_fusion_scorer,
-                                          options.lm_fusion);
+                                          options.lm_fusion,
+                                          options.lm_initial_histories);
   }
 
   static std::vector<std::shared_ptr<LogitsProcessor>>

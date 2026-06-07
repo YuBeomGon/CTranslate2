@@ -352,10 +352,12 @@ CMake changes:
 
 - Add `option(WITH_KENLM "Compile KenLM shallow fusion support" OFF)`.
 - Add `KENLM_ROOT` cache path.
+- Add `KENLM_MAX_ORDER` cache value matching the linked KenLM build.
 - Find `lm/model.hh` or `lm/virtual_interface.hh`.
 - Find KenLM libraries.
+- Link KenLM compression dependencies: zlib, bzip2, lzma.
 - Add `CT2_WITH_KENLM` compile definition only when enabled.
-- Append scorer source and libraries only when enabled.
+- Compile scorer source in all builds, with a `WITH_KENLM=OFF` runtime error stub.
 
 Scorer behavior:
 

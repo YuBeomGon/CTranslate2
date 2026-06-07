@@ -33,7 +33,12 @@ namespace {
     {
     }
 
-    std::unique_ptr<LmStateBatch> make_initial_states(size_t size) const override {
+    std::unique_ptr<LmStateBatch>
+    make_initial_states(size_t size,
+                        const std::vector<std::vector<size_t>>* initial_histories = nullptr,
+                        dim_t beam_size = 1) const override {
+      (void)initial_histories;
+      (void)beam_size;
       return std::make_unique<FakeLmStateBatch>(size);
     }
 

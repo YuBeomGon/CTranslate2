@@ -308,6 +308,8 @@ namespace ctranslate2 {
                    lm_fusion_alpha: Weight applied to KenLM token log probabilities.
                    lm_fusion_asr_topk: Number of ASR candidates per beam to rescore with KenLM.
                    lm_fusion_debug: Enable optional LM fusion debug output.
+                    When LM fusion is enabled and ``return_scores`` is true, returned scores are
+                    fused ASR and KenLM cumulative scores. Returned logits remain ASR-only.
 
                  Returns:
                    A list of generation results.

@@ -61,7 +61,8 @@ namespace ctranslate2 {
                const float prefix_bias_beta = 0,
                const float patience = 1,
                std::shared_ptr<const LmFusionScorer> lm_fusion_scorer = nullptr,
-               LmFusionOptions lm_fusion = {});
+               LmFusionOptions lm_fusion = {},
+               std::vector<std::vector<size_t>> lm_initial_histories = {});
 
     std::vector<DecodingResult>
     search(layers::Decoder& decoder,
@@ -89,6 +90,7 @@ namespace ctranslate2 {
     const size_t _max_candidates;
     const std::shared_ptr<const LmFusionScorer> _lm_fusion_scorer;
     const LmFusionOptions _lm_fusion;
+    const std::vector<std::vector<size_t>> _lm_initial_histories;
   };
 
   class BiasedDecoder {

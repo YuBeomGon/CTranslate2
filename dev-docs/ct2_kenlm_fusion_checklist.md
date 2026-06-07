@@ -79,21 +79,23 @@
 - [x] initial history는 `original_id < _eot_id` text token으로 제한
 - [x] Python `WhisperWrapper::generate()` signature 확장
 - [x] pybind keyword list 확장
-- [ ] Python docstring에 fused score 의미 명시
+- [x] Python docstring에 fused score 의미 명시
 
 ## 7. KenLM Build and Scorer
 
-- [ ] `WITH_KENLM` CMake option 추가
-- [ ] `KENLM_ROOT` cache path 추가
-- [ ] KenLM include discovery 추가
-- [ ] KenLM library discovery 추가
-- [ ] `CT2_WITH_KENLM` compile definition 추가
-- [ ] `WITH_KENLM=OFF` 요청 error 구현
-- [ ] KenLM binary loader 구현
-- [ ] token id to `t<ID>` word index table 구현
-- [ ] log10 to natural log 변환 구현
-- [ ] text token state advance 구현
-- [ ] skip token state copy 구현
+- [x] `WITH_KENLM` CMake option 추가
+- [x] `KENLM_ROOT` cache path 추가
+- [x] `KENLM_MAX_ORDER` cache value 추가
+- [x] KenLM include discovery 추가
+- [x] KenLM library discovery 추가
+- [x] KenLM compression dependency link 추가
+- [x] `CT2_WITH_KENLM` compile definition 추가
+- [x] `WITH_KENLM=OFF` 요청 error 구현
+- [x] KenLM binary loader 구현
+- [x] token id to `t<ID>` word index table 구현
+- [x] log10 to natural log 변환 구현
+- [x] text token state advance 구현
+- [x] skip token state copy 구현
 - [ ] path-keyed shared cache 도입 여부 결정
 
 ## 8. Tests
@@ -107,8 +109,8 @@
 - [ ] finished batch prune state alignment test
 - [ ] hard-prefix state sync test
 - [ ] fused EOS/final score test
-- [ ] `WITH_KENLM=OFF` error smoke
-- [ ] KenLM fixture integration test
+- [x] `WITH_KENLM=OFF` error smoke
+- [x] KenLM fixture integration test
 - [ ] Python API smoke test
 
 ## 9. Benchmark and Evaluation
@@ -127,8 +129,8 @@
 
 ## 10. Release Readiness
 
-- [ ] `WITH_KENLM=OFF` default build 확인
-- [ ] `WITH_KENLM=ON` build 확인
+- [x] `WITH_KENLM=OFF` default build 확인
+- [x] `WITH_KENLM=ON` build 확인
 - [ ] C++ tests 통과
 - [ ] Python smoke 통과
 - [ ] benchmark 결과 문서화

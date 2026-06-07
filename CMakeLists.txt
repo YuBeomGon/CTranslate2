@@ -23,7 +23,11 @@ option(BUILD_TESTS "Compile the tests" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(WITH_TENSOR_PARALLEL "Compile with NCCL and MPI backend" OFF)
 option(WITH_FLASH_ATTN "Compile with Flash Attention 2" OFF)
+option(WITH_KENLM "Compile KenLM shallow fusion support" OFF)
 option(ENABLE_ADDRESS_SANITIZER "ASAN" OFF)
+
+set(KENLM_ROOT "" CACHE PATH "Path to KenLM source, build, or install root")
+set(KENLM_MAX_ORDER "6" CACHE STRING "KenLM maximum n-gram order used to compile the linked KenLM library")
 
 MESSAGE(STATUS "Compiler Id: ${CMAKE_CXX_COMPILER_ID}")
 MESSAGE(STATUS "Compiler Version: ${CMAKE_CXX_COMPILER_VERSION}")
@@ -130,6 +134,7 @@ set(SOURCES
   src/env.cc
   src/filesystem.cc
   src/generator.cc
+  src/kenlm_fusion.cc
   src/layers/attention_layer.cc
   src/layers/attention.cc
   src/layers/flash_attention.cc
@@ -260,6 +265,44 @@ set(LIBRARIES
   ${CMAKE_THREAD_LIBS_INIT}
   spdlog::spdlog_header_only
   )
+
+if(WITH_KENLM)
+  find_path(KENLM_INCLUDE_DIR
+    NAMES lm/model.hh
+    HINTS ${KENLM_ROOT}
+    PATH_SUFFIXES include
+  )
+  find_library(KENLM_LIBRARY
+    NAMES kenlm
+    HINTS ${KENLM_ROOT}
+    PATH_SUFFIXES lib build/lib
+  )
+  find_library(KENLM_UTIL_LIBRARY
+    NAMES kenlm_util
+    HINTS ${KENLM_ROOT}
+    PATH_SUFFIXES lib build/lib
+  )
+  find_package(ZLIB REQUIRED)
+  find_package(BZip2 REQUIRED)
+  find_package(LibLZMA REQUIRED)
+
+  if(NOT KENLM_INCLUDE_DIR OR NOT KENLM_LIBRARY OR NOT KENLM_UTIL_LIBRARY)
+    message(FATAL_ERROR "WITH_KENLM=ON requires KenLM headers and libraries. Set KENLM_ROOT to the KenLM source/build/install root.")
+  endif()
+
+  message(STATUS "Using KenLM include: ${KENLM_INCLUDE_DIR}")
+  message(STATUS "Using KenLM library: ${KENLM_LIBRARY}")
+  message(STATUS "Using KenLM util library: ${KENLM_UTIL_LIBRARY}")
+  add_definitions(-DCT2_WITH_KENLM -DKENLM_MAX_ORDER=${KENLM_MAX_ORDER})
+  list(APPEND PRIVATE_INCLUDE_DIRECTORIES ${KENLM_INCLUDE_DIR})
+  list(APPEND LIBRARIES
+    ${KENLM_LIBRARY}
+    ${KENLM_UTIL_LIBRARY}
+    ${ZLIB_LIBRARIES}
+    ${BZIP2_LIBRARIES}
+    ${LIBLZMA_LIBRARIES}
+  )
+endif()
 
 macro(ct2_compile_kernels_for_isa isa flag)
   configure_file(

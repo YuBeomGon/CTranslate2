@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "ctranslate2/decoding.h"
+#include "ctranslate2/kenlm_fusion.h"
 
 #include "dispatch.h"
 #include "dtw.h"
@@ -321,7 +322,7 @@ namespace ctranslate2 {
         decoding_options.lm_fusion.text_token_limit = _eot_id;
         decoding_options.lm_fusion.debug = options.lm_fusion_debug;
         decoding_options.lm_initial_histories = std::move(lm_initial_histories);
-        throw std::runtime_error("Whisper KenLM fusion scorer is not implemented yet");
+        decoding_options.lm_fusion_scorer = load_kenlm_bpe_scorer(options.lm_fusion_model_path, _eot_id);
       }
 
       for (const auto& id : options.suppress_tokens) {
