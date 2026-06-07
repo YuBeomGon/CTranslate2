@@ -250,7 +250,10 @@ public:
 class LmFusionScorer {
 public:
   virtual ~LmFusionScorer() = default;
-  virtual std::unique_ptr<LmStateBatch> make_initial_states(size_t size) const = 0;
+  virtual std::unique_ptr<LmStateBatch>
+  make_initial_states(size_t size,
+                      const std::vector<std::vector<size_t>>* initial_histories = nullptr,
+                      dim_t beam_size = 1) const = 0;
   virtual float score_token(const LmStateBatch& in_states,
                             size_t in_index,
                             size_t original_token_id,

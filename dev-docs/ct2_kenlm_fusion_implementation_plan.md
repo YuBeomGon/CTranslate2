@@ -4,6 +4,10 @@
 
 정책과 계약의 SSOT는 design 문서다. 이 문서는 파일 위치, 변경 순서, 검증 방법만 다룬다.
 
+구현 중 원래 계획에서 확정/변경된 사항은 [implementation-notes/phase1-4_design_deltas.md](implementation-notes/phase1-4_design_deltas.md)에 기록한다.
+
+Phase 1-4 구현 후 리뷰 결과는 [implementation-notes/phase1-4_code_doc_review.md](implementation-notes/phase1-4_code_doc_review.md)에 기록한다.
+
 ## 1. Current Code Map
 
 현재 확인한 주요 코드 위치는 다음이다.
@@ -101,6 +105,7 @@ Recommended header location:
 ```cpp
 std::shared_ptr<const LmFusionScorer> lm_fusion_scorer = nullptr;
 LmFusionOptions lm_fusion;
+std::vector<std::vector<size_t>> lm_initial_histories;
 ```
 
 `BeamSearch` private fields:
@@ -108,6 +113,7 @@ LmFusionOptions lm_fusion;
 ```cpp
 const LmFusionOptions _lm_fusion;
 std::shared_ptr<const LmFusionScorer> _lm_fusion_scorer;
+std::vector<std::vector<size_t>> _lm_initial_histories;
 ```
 
 Risk:
@@ -254,7 +260,8 @@ Implementation options:
 1. Add `DecodingOptions::lm_initial_histories` as original token ids per batch.
 2. In `WhisperReplica::generate()`, set it from prompt tokens that were forwarded before decode.
 3. Filter history to `original_id < _eot_id` before passing it to decoding.
-4. In `BeamSearch`, scorer initializes state by replaying these text histories before beam replication.
+4. In `BeamSearch`, pass these histories to `LmFusionScorer::make_initial_states(...)`.
+5. The scorer initializes state by replaying text histories while keeping LM state opaque to BeamSearch.
 
 Risk:
 
