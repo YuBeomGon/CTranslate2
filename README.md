@@ -4,6 +4,59 @@
 
 CTranslate2 is a C++ and Python library for efficient inference with Transformer models.
 
+## Branch: Whisper KenLM BPE fusion
+
+This branch adds experimental Whisper KenLM BPE shallow fusion to CTranslate2.
+The goal is to rescore Whisper beam-search candidates with a KenLM language model
+trained on Whisper BPE token IDs, improving domain long-tail term recall while
+keeping fusion disabled by default unless a KenLM binary path and positive alpha
+are passed.
+
+Build the release artifact for this branch with KenLM enabled:
+
+```bash
+cmake -S . -B build-kenlm \
+  -DWITH_KENLM=ON \
+  -DKENLM_ROOT=/path/to/kenlm
+cmake --build build-kenlm
+```
+
+Python `Whisper.generate` exposes these fusion kwargs:
+
+```python
+results = model.generate(
+    features,
+    [prompt],
+    beam_size=5,
+    num_hypotheses=1,
+    sampling_temperature=0.0,
+    lm_fusion_model_path="/path/to/domain.binary",
+    lm_fusion_alpha=0.20,
+    lm_fusion_asr_topk=50,
+    lm_fusion_debug=False,
+)
+```
+
+Fusion is disabled when `lm_fusion_model_path` is empty or
+`lm_fusion_alpha <= 0`. KenLM `.binary` files are external model/domain
+artifacts and are not bundled in this repository.
+
+Summary of the current benchmark snapshot:
+
+- best CER in the measured sweep: `alpha=0.20`
+- best domain term recall in the measured sweep: `alpha=0.30`
+- measured fusion-on latency cost: about +26% RTF versus baseline
+- tested fusion candidate width: `lm_fusion_asr_topk=50`
+
+More details:
+
+- Design SSOT: [`dev-docs/ct2_kenlm_fusion_design.md`](dev-docs/ct2_kenlm_fusion_design.md)
+- Release/results snapshot: [`dev-docs/ct2_kenlm_fusion_results.md`](dev-docs/ct2_kenlm_fusion_results.md)
+- Implementation checklist: [`dev-docs/ct2_kenlm_fusion_checklist.md`](dev-docs/ct2_kenlm_fusion_checklist.md)
+
+KenLM is `LGPL-2.1-or-later`. A KenLM-enabled binary/wheel/image should include
+the required KenLM license notice and make the linking/distribution policy clear.
+
 The project implements a custom runtime that applies many performance optimization techniques such as weights quantization, layers fusion, batch reordering, etc., to [accelerate and reduce the memory usage](#benchmarks) of Transformer models on CPU and GPU.
 
 The following model types are currently supported:
