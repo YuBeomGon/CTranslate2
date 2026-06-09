@@ -50,9 +50,8 @@ Summary of the current benchmark snapshot:
 
 More details:
 
-- Design SSOT: [`dev-docs/ct2_kenlm_fusion_design.md`](dev-docs/ct2_kenlm_fusion_design.md)
-- Release/results snapshot: [`dev-docs/ct2_kenlm_fusion_results.md`](dev-docs/ct2_kenlm_fusion_results.md)
-- Implementation checklist: [`dev-docs/ct2_kenlm_fusion_checklist.md`](dev-docs/ct2_kenlm_fusion_checklist.md)
+- KenLM fusion SSOT: [`dev-docs/kenlm_fusion.md`](dev-docs/kenlm_fusion.md)
+- Documentation map: [`dev-docs/README.md`](dev-docs/README.md)
 
 KenLM is `LGPL-2.1-or-later`. A KenLM-enabled binary/wheel/image should include
 the required KenLM license notice and make the linking/distribution policy clear.
