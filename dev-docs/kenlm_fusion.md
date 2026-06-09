@@ -21,7 +21,15 @@ KenLM은 Whisper token id를 pseudo-word로 변환한 corpus로 학습한다.
 Whisper token id 1234 -> KenLM word "t1234"
 ```
 
-## 2. Release Artifact
+## 2. Related Repositories
+
+- [whisper-lm-fusion](https://github.com/YuBeomGon/whisper-lm-fusion)
+  - Python wrapper/integration repo.
+  - audio input, windowing, caller-facing API, and CT2 `lm_fusion_*` kwargs wiring을 담당한다.
+- This CTranslate2 branch
+  - Whisper beam-search core, KenLM scorer, cache, and C++/Python binding surface를 담당한다.
+
+## 3. Release Artifact
 
 이 브랜치의 의미 있는 릴리즈 artifact는 KenLM-enabled CTranslate2 build다.
 
@@ -44,7 +52,7 @@ cmake -S . -B build-kenlm \
 cmake --build build-kenlm
 ```
 
-## 3. Python API
+## 4. Python API
 
 `ctranslate2.models.Whisper.generate()`에 다음 kwargs가 추가된다.
 
@@ -83,7 +91,7 @@ results = model.generate(
 
 `lm_fusion_beta`는 지원하지 않는다.
 
-## 4. Runtime Behavior
+## 5. Runtime Behavior
 
 1차 구현은 `topk_strict` 방식이다.
 
@@ -102,7 +110,7 @@ KenLM scorer는 process-local path-keyed shared cache를 사용한다.
 이 cache는 같은 `.binary` path를 반복 호출할 때 KenLM model reload 비용을 제거한다.
 beam step마다 발생하는 KenLM scoring 비용 자체를 없애지는 않는다.
 
-## 5. Benchmark Snapshot
+## 6. Benchmark Snapshot
 
 확인한 평가 조건:
 
@@ -147,7 +155,7 @@ Alpha sweep summary:
 - `alpha=0.40`부터 repetition이 발생하므로 운영 기본값으로 쓰지 않는다.
 - fusion on 비용은 RTF `0.0154 -> 0.0194` 수준으로 약 +26%다.
 
-## 6. Python Smoke
+## 7. Python Smoke
 
 Python smoke는 품질 평가가 아니라 `WITH_KENLM=ON` build/install에서 새 kwargs가 실제 호출 가능한지 확인하는 절차다.
 
@@ -186,7 +194,7 @@ model.generate(
 
 현재 상태: Python smoke 호출 예시는 문서화되어 있지만, 최종 wheel/install artifact 대상 실행은 release 직전 1회 더 필요하다.
 
-## 7. License and Packaging
+## 8. License and Packaging
 
 KenLM checkout의 `LICENSE` 기준 KenLM 본체는 `LGPL-2.1-or-later`이다.
 무료 사용은 가능하지만, binary distribution에서는 license notice와 linking/distribution 조건을 지켜야 한다.
@@ -199,7 +207,7 @@ KenLM checkout의 `LICENSE` 기준 KenLM 본체는 `LGPL-2.1-or-later`이다.
 - public wheel에 KenLM을 조용히 vendoring/static link하지 않는다. 필요하면 별도 license/relinking review를 거친다.
 - KenLM `.binary` LM 파일은 model/domain artifact이며 CTranslate2 package에 포함하지 않는다.
 
-## 8. Current Release Readiness
+## 9. Current Release Readiness
 
 내부/실험 릴리즈는 가능하다.
 

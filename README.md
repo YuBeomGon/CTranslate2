@@ -52,6 +52,7 @@ More details:
 
 - KenLM fusion SSOT: [`dev-docs/kenlm_fusion.md`](dev-docs/kenlm_fusion.md)
 - Documentation map: [`dev-docs/README.md`](dev-docs/README.md)
+- Python wrapper/integration repo: [`whisper-lm-fusion`](https://github.com/YuBeomGon/whisper-lm-fusion)
 
 KenLM is `LGPL-2.1-or-later`. A KenLM-enabled binary/wheel/image should include
 the required KenLM license notice and make the linking/distribution policy clear.
