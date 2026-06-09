@@ -2,8 +2,17 @@
 
 #include <cstring>
 #include <cmath>
+#include <cstdlib>
+#include <mutex>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
+
+#ifdef _WIN32
+#  include <windows.h>
+#else
+#  include <stdlib.h>
+#endif
 
 #ifdef CT2_WITH_KENLM
 #  include <lm/model.hh>
@@ -16,6 +25,23 @@ namespace ctranslate2 {
   namespace {
 
     constexpr float kLog10ToLn = 2.302585092994046f;
+
+    struct KenlmBpeScorerCacheKey {
+      std::string model_path;
+      size_t text_token_limit;
+
+      bool operator==(const KenlmBpeScorerCacheKey& other) const {
+        return model_path == other.model_path && text_token_limit == other.text_token_limit;
+      }
+    };
+
+    struct KenlmBpeScorerCacheKeyHash {
+      size_t operator()(const KenlmBpeScorerCacheKey& key) const {
+        const size_t path_hash = std::hash<std::string>()(key.model_path);
+        const size_t limit_hash = std::hash<size_t>()(key.text_token_limit);
+        return path_hash ^ (limit_hash + 0x9e3779b9 + (path_hash << 6) + (path_hash >> 2));
+      }
+    };
 
     class KenlmBpeStateBatch final : public LmStateBatch {
     public:
@@ -179,13 +205,66 @@ namespace ctranslate2 {
       std::vector<lm::WordIndex> _word_indices;
     };
 
+    std::string canonical_model_path(const std::string& model_path) {
+#ifdef _WIN32
+      int wcount = MultiByteToWideChar(CP_UTF8, 0, model_path.c_str(), -1, nullptr, 0);
+      if (wcount == 0)
+        throw std::runtime_error("Failed to resolve KenLM model path: " + model_path);
+      std::wstring wpath(wcount, 0);
+      MultiByteToWideChar(CP_UTF8, 0, model_path.c_str(), -1, &wpath[0], wcount);
+
+      const DWORD full_size = GetFullPathNameW(wpath.c_str(), 0, nullptr, nullptr);
+      if (full_size == 0)
+        throw std::runtime_error("Failed to resolve KenLM model path: " + model_path);
+      std::wstring full_path(full_size, 0);
+      const DWORD written = GetFullPathNameW(wpath.c_str(), full_size, &full_path[0], nullptr);
+      if (written == 0 || written >= full_size)
+        throw std::runtime_error("Failed to resolve KenLM model path: " + model_path);
+      full_path.resize(written);
+
+      int count = WideCharToMultiByte(CP_UTF8, 0, full_path.c_str(), -1, nullptr, 0, nullptr, nullptr);
+      if (count == 0)
+        throw std::runtime_error("Failed to resolve KenLM model path: " + model_path);
+      std::string path(count, 0);
+      WideCharToMultiByte(CP_UTF8, 0, full_path.c_str(), -1, &path[0], count, nullptr, nullptr);
+      if (!path.empty() && path.back() == '\0')
+        path.pop_back();
+      return path;
+#else
+      char* resolved = realpath(model_path.c_str(), nullptr);
+      if (!resolved)
+        throw std::runtime_error("Failed to resolve KenLM model path: " + model_path);
+      std::string path(resolved);
+      free(resolved);
+      return path;
+#endif
+    }
+
+    KenlmBpeScorerCacheKey
+    make_cache_key(const std::string& model_path, size_t text_token_limit) {
+      return {canonical_model_path(model_path), text_token_limit};
+    }
+
   }
 #endif
 
   std::shared_ptr<const LmFusionScorer>
   load_kenlm_bpe_scorer(const std::string& model_path, size_t text_token_limit) {
 #ifdef CT2_WITH_KENLM
-    return std::make_shared<KenlmBpeScorer>(model_path, text_token_limit);
+    static std::mutex cache_mutex;
+    static std::unordered_map<KenlmBpeScorerCacheKey,
+                              std::shared_ptr<const LmFusionScorer>,
+                              KenlmBpeScorerCacheKeyHash> cache;
+
+    const KenlmBpeScorerCacheKey key = make_cache_key(model_path, text_token_limit);
+    const std::lock_guard<std::mutex> lock(cache_mutex);
+    const auto it = cache.find(key);
+    if (it != cache.end())
+      return it->second;
+
+    auto scorer = std::make_shared<KenlmBpeScorer>(key.model_path, text_token_limit);
+    cache.emplace(key, scorer);
+    return scorer;
 #else
     (void)model_path;
     (void)text_token_limit;

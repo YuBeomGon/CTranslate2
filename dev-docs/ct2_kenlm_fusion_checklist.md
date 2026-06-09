@@ -10,8 +10,8 @@
 - [x] Implementation plan 문서 작성
 - [x] Checklist 문서 작성
 - [x] `AGENTS.md`에 SSOT 링크와 문서 규칙 추가
-- [ ] 구현 중 design 결정 변경 시 design 문서 갱신
-- [ ] 구현 완료 후 benchmark/result 문서 추가
+- [x] 구현 중 design 결정 변경 시 design 문서 갱신
+- [x] 구현 완료 후 benchmark/result 문서 추가
 
 ## 2. Decoder Mapping
 
@@ -96,7 +96,7 @@
 - [x] log10 to natural log 변환 구현
 - [x] text token state advance 구현
 - [x] skip token state copy 구현
-- [ ] path-keyed shared cache 도입 여부 결정
+- [x] path-keyed shared cache 구현
 
 ## 8. Tests
 
@@ -111,28 +111,29 @@
 - [ ] fused EOS/final score test
 - [x] `WITH_KENLM=OFF` error smoke
 - [x] KenLM fixture integration test
+- [x] path-keyed scorer cache test
 - [ ] Python API smoke test
 
 ## 9. Benchmark and Evaluation
 
 - [ ] HF POC 최신 metric 재측정
-- [ ] baseline CT2 latency 측정
+- [x] baseline CT2 latency 측정
 - [ ] fusion topk=20 latency/quality 측정
-- [ ] fusion topk=50 latency/quality 측정
+- [x] fusion topk=50 latency/quality 측정
 - [ ] fusion topk=100 latency/quality 측정
-- [ ] alpha sweep 측정
+- [x] alpha sweep 측정
 - [ ] p50/p95 latency 기록
 - [ ] KenLM query count 기록
 - [ ] CPU fusion time 기록
-- [ ] domain term recall/precision 기록
-- [ ] CER/WER 기록
+- [x] domain term recall/precision 기록
+- [x] CER/WER 기록
 
 ## 10. Release Readiness
 
 - [x] `WITH_KENLM=OFF` default build 확인
 - [x] `WITH_KENLM=ON` build 확인
-- [ ] C++ tests 통과
+- [ ] C++ tests 통과 (LM fusion targeted tests 통과, full suite CPU GEMM failure 별도 triage 필요)
 - [ ] Python smoke 통과
-- [ ] benchmark 결과 문서화
-- [ ] KenLM license 검토
-- [ ] packaging 정책 결정
+- [x] benchmark 결과 문서화
+- [x] KenLM license 검토
+- [x] KenLM-enabled release artifact packaging 정책 결정

@@ -1,6 +1,7 @@
 *.pyc
 /.vs
 /build
+/build-kenlm
 
 CMake*.json
 .idea

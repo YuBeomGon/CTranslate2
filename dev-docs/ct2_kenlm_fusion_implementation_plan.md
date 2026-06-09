@@ -377,26 +377,28 @@ Scorer behavior:
 Risk:
 
 - Actual KenLM library names and include layout must be verified against the local KenLM build.
-- KenLM license and packaging policy must be checked before distribution.
+- KenLM is `LGPL-2.1-or-later` in the local checkout. Keep the default package `WITH_KENLM=OFF`;
+  distribute KenLM-enabled artifacts as explicit variants with license notice and clear linking policy.
 
 ## 13. Step 11: Cache Policy
 
 Files:
 
-- Optional `src/kenlm_cache.cc`
-- Optional `include/ctranslate2/kenlm_fusion.h`
+- `src/kenlm_fusion.cc`
+- `include/ctranslate2/kenlm_fusion.h`
 
-1차 choice:
+Implemented choice:
 
-- If speed of implementation matters, create scorer per request and document it as experimental.
-- If multi-worker memory matters from day one, implement path-keyed shared cache.
+- `load_kenlm_bpe_scorer(...)` owns a process-local path-keyed shared cache.
+- Cache key is canonical path plus `text_token_limit`.
+- Cache value is `shared_ptr<const LmFusionScorer>` and stays alive for the process lifetime.
+- Per-request/per-beam LM state is still created by `make_initial_states(...)`.
 
-Recommended operating design:
+Operating design:
 
 ```text
-model: shared_ptr<const KenlmModelHandle>, keyed by path
+model/scorer: shared_ptr<const LmFusionScorer>, keyed by canonical path + text_token_limit
 state: request/beam local
-scorer wrapper: cheap object, can be per request
 ```
 
 Scorer lifetime is fixed from v1:

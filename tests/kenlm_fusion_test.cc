@@ -38,4 +38,19 @@ TEST(KenlmFusionTest, FixtureSmoke) {
 #endif
 }
 
+TEST(KenlmFusionTest, ReusesCachedScorerForSamePath) {
+#ifndef CT2_WITH_KENLM
+  GTEST_SKIP() << "Requires WITH_KENLM=ON";
+#else
+  const char* model_path = std::getenv("CT2_KENLM_TEST_BINARY");
+  if (!model_path)
+    GTEST_SKIP() << "Set CT2_KENLM_TEST_BINARY to run the KenLM cache test";
+
+  const auto scorer1 = ctranslate2::load_kenlm_bpe_scorer(model_path, 8);
+  const auto scorer2 = ctranslate2::load_kenlm_bpe_scorer(model_path, 8);
+
+  EXPECT_EQ(scorer1, scorer2);
+#endif
+}
+
 }

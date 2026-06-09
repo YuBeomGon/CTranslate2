@@ -20,6 +20,7 @@
 - Design SSOT: `dev-docs/ct2_kenlm_fusion_design.md`
 - Implementation plan: `dev-docs/ct2_kenlm_fusion_implementation_plan.md`
 - Checklist: `dev-docs/ct2_kenlm_fusion_checklist.md`
+- Results snapshot: `dev-docs/ct2_kenlm_fusion_results.md`
 - References: `dev-docs/reference/`
 
 ## Documentation Rules

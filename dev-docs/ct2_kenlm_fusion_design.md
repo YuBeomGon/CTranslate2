@@ -9,6 +9,8 @@ Reference 문서는 근거와 과거 초안이다. 최신 판단이 reference와
 - `dev-docs/reference/CT2 Whisper KenLM BPE Fusion 구현 계획.md`
 - `dev-docs/reference/CTranslate2 KenLM BPE shallow fusion 코드 통합 리서치.md`
 
+평가 결과 스냅샷은 `dev-docs/ct2_kenlm_fusion_results.md`에 둔다.
+
 ## 1. Goal
 
 HuggingFace POC에서 검증한 Whisper BPE token-id KenLM 1-pass shallow fusion을 CTranslate2 Whisper beam search 내부로 이식한다.
@@ -171,15 +173,17 @@ Whisper prompt 중 decoder state에 이미 replay된 prefix text가 있으면 LM
 
 KenLM model은 immutable shared object로 보고, per-request/per-beam `State`는 공유하지 않는다.
 
-1차 실험 구현은 단순 load도 가능하지만, 운영형 설계는 path-keyed shared cache가 맞다.
+Runtime loader는 process-local path-keyed shared cache를 사용한다.
+같은 KenLM binary를 반복 요청하면 scorer/model을 재사용하고, LM state만 request/beam 단위로 새로 만든다.
 
-Cache key는 최소한 canonical path를 포함해야 하며, 운영 hardening에서는 file size/mtime 또는 artifact version을 추가한다.
+Cache key는 canonical path와 `text_token_limit` 조합이다.
+운영 hardening에서는 file size/mtime 또는 artifact version을 추가할 수 있다.
 
-### 3.10 Build Policy
+### 3.10 Build and Packaging Policy
 
-KenLM은 optional dependency다.
+KenLM은 build-time optional dependency다.
 
-기본 빌드는 기존 CT2와 동일해야 한다.
+upstream baseline과 호환되는 기본 빌드는 다음이다.
 
 ```text
 WITH_KENLM=OFF
@@ -190,6 +194,20 @@ WITH_KENLM=OFF
 ```text
 KenLM fusion requires CTranslate2 built with WITH_KENLM=ON
 ```
+
+하지만 이 브랜치/릴리즈의 의미 있는 artifact는 KenLM-enabled build다.
+이 작업의 릴리즈 artifact는 다음으로 빌드한다.
+
+```text
+WITH_KENLM=ON
+```
+
+KenLM license/packaging 정책:
+
+- KenLM-enabled release artifact는 KenLM을 명시적으로 포함하거나 링크하고, `LGPL-2.1-or-later` license notice를 포함한다.
+- linked KenLM library와 license notice가 명확한 dynamic link 또는 Docker/internal image 형태를 우선한다.
+- public wheel에 KenLM을 조용히 vendoring/static link하지 않는다. 필요하면 별도 license/relinking review를 거친다.
+- KenLM `.binary` LM artifact는 CT2 package payload가 아니라 pipeline/domain artifact로 배포한다.
 
 ### 3.11 Score Semantics
 
@@ -308,7 +326,6 @@ Unsupported mode는 silent fallback하지 않는다.
 
 ## 8. Open Questions
 
-- 1차 구현에서 path-keyed KenLM cache를 포함할지, 단순 load로 시작할지 결정이 필요하다.
 - previous-text prompt replay 범위를 실제 faster-whisper 운영 경로와 맞출지 확인이 필요하다. 1차 구현은 forwarded prompt prefix의 text token replay까지만 지원한다.
 - timestamp-enabled decoding을 1차부터 허용할지, skip token 정책만으로 충분한지 test가 필요하다.
-- KenLM을 system install, `KENLM_ROOT`, vendoring 중 어떤 방식으로 빌드에 포함할지 결정이 필요하다.
+- KenLM-enabled 배포를 dynamic link, system install, Docker/internal image 중 어떤 형태로 낼지 release artifact별 결정이 필요하다.

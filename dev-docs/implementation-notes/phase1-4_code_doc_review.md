@@ -49,12 +49,12 @@ Phase 1-4 구현에서 즉시 rollback해야 할 차단 이슈는 확인하지 �
 - 위험: 링크되는 KenLM library와 다른 값으로 빌드하면 ABI/state layout이 맞지 않을 수 있다.
 - 권장 후속 작업: `KENLM_ROOT/build/CMakeCache.txt`가 있으면 `KENLM_MAX_ORDER` 값을 읽어 mismatch를 조기에 fail하는 CMake guard를 추가한다.
 
-### Low: path-keyed KenLM shared cache 미구현
+### Resolved: path-keyed KenLM shared cache
 
 - 관련 코드: `src/models/whisper.cc:325`, `src/kenlm_fusion.cc:185`
-- 현재 정책: `lm_fusion_model_path`가 주어질 때마다 scorer를 생성한다.
-- 영향: 기능 문제는 아니지만 반복 호출 시 KenLM binary load 비용이 커질 수 있다.
-- 권장 후속 작업: canonical path 기반 shared cache를 v1.1로 추가한다.
+- 현재 정책: `load_kenlm_bpe_scorer(...)`가 canonical path와 `text_token_limit` 기준으로 scorer를 cache한다.
+- 영향: 같은 KenLM binary 반복 호출 시 binary reload 비용을 피한다.
+- 남은 hardening: 필요 시 file size/mtime 또는 artifact version을 cache key에 추가한다.
 
 ### Low: Python extension smoke 미검증
 
@@ -99,5 +99,4 @@ CT2_KENLM_TEST_BINARY=/tmp/ct2_lm_fusion_test.binary LD_LIBRARY_PATH=/usr/lib/x8
 1. hard-prefix LM state sync unit test
 2. deterministic KenLM score fixture test
 3. Whisper Python/API smoke
-4. path-keyed KenLM shared cache
-5. 실제 운영 KenLM binary 기준 WER/latency benchmark
+4. 실제 운영 KenLM binary 기준 WER/latency benchmark

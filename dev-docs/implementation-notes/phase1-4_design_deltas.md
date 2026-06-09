@@ -66,8 +66,10 @@
 - 로컬 해결: `LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu`를 지정해 시스템 `libstdc++`를 먼저 사용했다.
 - 코드 영향: 없음. 검증 환경 이슈로만 기록한다.
 
-## 10. Shared cache는 미구현
+## 10. Shared cache 구현
 
 - 원래 설계: path-keyed shared KenLM cache는 운영형으로 유리하지만 v1.1 후보였다.
-- 최종 Phase 4 범위: per-call simple loader만 구현했다.
-- 남은 작업: 동일 `lm_fusion_model_path` 반복 호출 시 중복 load를 줄이려면 별도 cache ownership 정책을 확정해야 한다.
+- 최종 결정: `src/kenlm_fusion.cc::load_kenlm_bpe_scorer(...)`에 process-local shared cache를 둔다.
+- Cache key: canonical path + `text_token_limit`.
+- Cache value: `shared_ptr<const LmFusionScorer>`.
+- 남은 hardening: 운영 artifact 변경 감지가 필요하면 file size/mtime 또는 artifact version을 cache key에 추가한다.
